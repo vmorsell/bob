@@ -1,18 +1,31 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"regexp"
+	"strings"
 
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 )
 
-func NewSlackHandler(botToken, signingSecret string) http.Handler {
+var mentionRe = regexp.MustCompile(`<@[A-Z0-9]+>\s*`)
+
+func NewSlackHandler(botToken, signingSecret string, llm LLM) http.Handler {
 	client := slack.New(botToken)
+
+	// Get our own bot user ID so we can identify our messages in threads.
+	authResp, err := client.AuthTest()
+	if err != nil {
+		log.Fatalf("slack auth test failed: %v", err)
+	}
+	botUserID := authResp.UserID
+	log.Printf("Bot user ID: %s", botUserID)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -62,13 +75,72 @@ func NewSlackHandler(botToken, signingSecret string) http.Handler {
 			switch ev := innerEvent.Data.(type) {
 			case *slackevents.AppMentionEvent:
 				log.Printf("app_mention from %s in %s: %s", ev.User, ev.Channel, ev.Text)
-				_, _, err := client.PostMessage(ev.Channel,
-					slack.MsgOptionText("Hey! I'm Bob. I heard you.", false),
-				)
-				if err != nil {
-					log.Printf("failed to post message: %v", err)
-				}
+
+				// Respond async so Slack gets a timely 200 OK.
+				go handleMention(client, llm, botUserID, ev)
 			}
 		}
 	})
+}
+
+func handleMention(client *slack.Client, llm LLM, botUserID string, ev *slackevents.AppMentionEvent) {
+	var messages []Message
+
+	if ev.ThreadTimeStamp != "" {
+		// Message is in a thread — fetch full thread for context.
+		replies, _, _, err := client.GetConversationReplies(&slack.GetConversationRepliesParameters{
+			ChannelID: ev.Channel,
+			Timestamp: ev.ThreadTimeStamp,
+		})
+		if err != nil {
+			log.Printf("failed to get thread replies: %v", err)
+			// Fall back to just the mention text.
+			messages = []Message{{Role: RoleUser, Content: stripMention(ev.Text)}}
+		} else {
+			messages = threadToMessages(replies, botUserID)
+		}
+	} else {
+		messages = []Message{{Role: RoleUser, Content: stripMention(ev.Text)}}
+	}
+
+	resp, err := llm.Respond(context.Background(), messages)
+	if err != nil {
+		log.Printf("llm error: %v", err)
+		resp = "Sorry, I hit an error trying to respond. Please try again."
+	}
+
+	// Reply in thread. Use the thread timestamp if already in a thread,
+	// otherwise start a new thread on the original message.
+	threadTS := ev.ThreadTimeStamp
+	if threadTS == "" {
+		threadTS = ev.TimeStamp
+	}
+
+	_, _, err = client.PostMessage(ev.Channel,
+		slack.MsgOptionText(resp, false),
+		slack.MsgOptionTS(threadTS),
+	)
+	if err != nil {
+		log.Printf("failed to post message: %v", err)
+	}
+}
+
+func threadToMessages(replies []slack.Message, botUserID string) []Message {
+	var messages []Message
+	for _, msg := range replies {
+		text := stripMention(msg.Text)
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
+		role := RoleUser
+		if msg.User == botUserID {
+			role = RoleAssistant
+		}
+		messages = append(messages, Message{Role: role, Content: text})
+	}
+	return messages
+}
+
+func stripMention(text string) string {
+	return strings.TrimSpace(mentionRe.ReplaceAllString(text, ""))
 }
