@@ -6,6 +6,6 @@ COPY . .
 RUN CGO_ENABLED=0 go build -o /bob .
 
 FROM alpine:latest
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates git
 COPY --from=build /bob /bob
 ENTRYPOINT ["/bob"]
