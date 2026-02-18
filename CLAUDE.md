@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is Bob
 
-Bob is an LLM helper for a software team, integrated with Slack via the Events API. He runs as a containerized Go service behind a Cloudflare tunnel. When mentioned, Bob uses an LLM to generate responses, with full thread context when mentioned in a thread. Bob can also interact with the team's GitHub organization — searching for repositories and cloning them via Anthropic tool use.
+Bob is an LLM helper for a software team, integrated with Slack via the Events API. He runs as a containerized Go service behind a Cloudflare tunnel. When mentioned, Bob uses an LLM to generate responses, with full thread context when mentioned in a thread. Bob can interact with the team's GitHub organization — searching for repositories, cloning them, implementing code changes via Claude Code CLI, and creating pull requests.
 
 ## Build and run
 
@@ -35,12 +35,18 @@ Go code is split by webhook source for extensibility:
 - `anthropic.go` — Anthropic adapter implementing `LLM` using Claude Sonnet via `anthropic-sdk-go`, with tool use loop
 - `tool.go` — `Tool` type bridging tool definitions and the Anthropic adapter
 - `git.go` — GitHub tools: `list_repos` (search org repos via GitHub REST API) and `clone_repo` (shallow clone to `/workspace`)
+- `claudecode.go` — `implement_changes` (run Claude Code CLI on a cloned repo) and `create_pull_request` (commit, push, open PR via GitHub API)
+- `notify.go` — `SlackNotifier` for tools to post mid-execution messages to the originating Slack thread via context
 
 ### Tool use pattern
 
-The Anthropic adapter accepts a `[]Tool` at construction. During `Respond`, it runs a loop (max 10 iterations): if the model returns `stop_reason=tool_use`, execute each requested tool, send results back, and loop. Tool execution errors are returned to the model as `is_error=true` results for graceful recovery.
+The Anthropic adapter accepts a `[]Tool` at construction. During `Respond`, it runs a loop (max 15 iterations): if the model returns `stop_reason=tool_use`, execute each requested tool, send results back, and loop. Tool execution errors are returned to the model as `is_error=true` results for graceful recovery.
 
 New tools: create a constructor returning `Tool` (closing over config), register it in `main.go`.
+
+### Notifier pattern
+
+`SlackNotifier` wraps the Slack client and reads channel/threadTS from context (injected by `slack.go`). Tools receive it at construction and call `notifier.Notify(ctx, text)` to post progress messages mid-execution. It no-ops if context values are missing.
 
 New webhook sources (Linear, GitHub, etc.) get their own `<source>.go` file and `/webhooks/<source>` route.
 
@@ -55,4 +61,5 @@ Defined in `.env` (gitignored), passed to containers via `compose.yaml`:
 - `ANTHROPIC_API_KEY` — Anthropic API key for LLM responses
 - `GITHUB_TOKEN` — GitHub personal access token for repo access
 - `GITHUB_OWNER` — GitHub owner (organization or personal username) to search/clone from
+- `CLAUDE_CODE_OAUTH_TOKEN` — OAuth token for Claude Code CLI (used by `implement_changes` tool)
 - `CLOUDFLARED_TOKEN` — Cloudflare tunnel token

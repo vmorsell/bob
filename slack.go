@@ -16,9 +16,7 @@ import (
 
 var mentionRe = regexp.MustCompile(`<@[A-Z0-9]+>\s*`)
 
-func NewSlackHandler(botToken, signingSecret string, llm LLM) http.Handler {
-	client := slack.New(botToken)
-
+func NewSlackHandler(client *slack.Client, signingSecret string, llm LLM) http.Handler {
 	// Get our own bot user ID so we can identify our messages in threads.
 	authResp, err := client.AuthTest()
 	if err != nil {
@@ -103,17 +101,19 @@ func handleMention(client *slack.Client, llm LLM, botUserID string, ev *slackeve
 		messages = []Message{{Role: RoleUser, Content: stripMention(ev.Text)}}
 	}
 
-	resp, err := llm.Respond(context.Background(), messages)
-	if err != nil {
-		log.Printf("llm error: %v", err)
-		resp = "Sorry, I hit an error trying to respond. Please try again."
-	}
-
-	// Reply in thread. Use the thread timestamp if already in a thread,
-	// otherwise start a new thread on the original message.
+	// Determine thread timestamp for replies.
 	threadTS := ev.ThreadTimeStamp
 	if threadTS == "" {
 		threadTS = ev.TimeStamp
+	}
+
+	// Inject Slack context so tools can send notifications mid-execution.
+	ctx := WithSlackThread(context.Background(), ev.Channel, threadTS)
+
+	resp, err := llm.Respond(ctx, messages)
+	if err != nil {
+		log.Printf("llm error: %v", err)
+		resp = "Sorry, I hit an error trying to respond. Please try again."
 	}
 
 	_, _, err = client.PostMessage(ev.Channel,

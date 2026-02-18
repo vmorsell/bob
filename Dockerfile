@@ -6,6 +6,8 @@ COPY . .
 RUN CGO_ENABLED=0 go build -o /bob .
 
 FROM alpine:latest
-RUN apk add --no-cache ca-certificates git
+RUN apk add --no-cache ca-certificates git nodejs npm \
+    && npm install -g @anthropic-ai/claude-code \
+    && adduser -D -u 1000 worker
 COPY --from=build /bob /bob
 ENTRYPOINT ["/bob"]
