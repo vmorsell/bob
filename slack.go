@@ -119,7 +119,7 @@ func handleMention(client *slack.Client, llm LLM, botUserID string, hub *Hub, ev
 	}
 
 	_, _, err = client.PostMessage(ev.Channel,
-		slack.MsgOptionText(resp, false),
+		slack.MsgOptionText(fmt.Sprintf("<@%s> %s", ev.User, resp), false),
 		slack.MsgOptionTS(threadTS),
 	)
 	if err != nil {

@@ -17,6 +17,7 @@ func main() {
 	githubToken := os.Getenv("GITHUB_TOKEN")
 	githubOwner := os.Getenv("GITHUB_OWNER")
 	claudeCodeToken := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN")
+	bobURL := os.Getenv("BOB_URL") // e.g. https://bob.example.com
 	if githubOwner == "" {
 		githubOwner = os.Getenv("GITHUB_ORG") // backwards compat
 	}
@@ -44,7 +45,11 @@ func main() {
 	}
 
 	onJobStart := func(ctx context.Context, jobID string) {
-		notifier.Notify(ctx, fmt.Sprintf("On it! Job ID: %s", jobID))
+		msg := fmt.Sprintf("On it! Job ID: %s", jobID)
+		if bobURL != "" {
+			msg = fmt.Sprintf("On it! <%s/jobs/%s|Job %s>", bobURL, jobID, jobID[:8])
+		}
+		notifier.Notify(ctx, msg)
 	}
 
 	llm := NewAnthropicLLM(anthropicKey, tools, hub, onJobStart)

@@ -17,6 +17,7 @@ services:
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - GITHUB_OWNER=${GITHUB_OWNER}
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
+      - BOB_URL=${BOB_URL}
     volumes:
       - workspace:/workspace
     restart: unless-stopped
