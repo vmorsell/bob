@@ -34,6 +34,7 @@ Go code is split by webhook source for extensibility:
 - `tool.go` — `Tool` type bridging tool definitions and the Anthropic adapter
 - `git.go` — GitHub tools: `list_repos` (search org repos via GitHub REST API) and `clone_repo` (shallow clone to `/workspace`)
 - `claudecode.go` — `implement_changes` (run Claude Code CLI on a cloned repo, streaming output via `streamingWriter`) and `create_pull_request` (commit, push, open PR via GitHub API)
+- `tests.go` — `run_tests` (run a test/build command in a cloned repo and return output to the LLM)
 - `notify.go` — `SlackNotifier` for tools to post mid-execution messages; context keys for channel, threadTS, jobID, and hub
 - `monitor.go` — `Hub` (SSE fan-out + JSONL persistence), event types, `streamingWriter`, REST handlers (`/api/jobs`, `/api/jobs/{id}`), SSE handler (`/events`), and dark-terminal web UI served at `/` and `/jobs/{id}`
 

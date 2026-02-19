@@ -41,6 +41,7 @@ func main() {
 		ListReposTool(githubOwner, githubToken),
 		CloneRepoTool(githubOwner, githubToken),
 		ImplementChangesTool(githubOwner, claudeCodeToken, notifier),
+		RunTestsTool(githubOwner, notifier),
 		CreatePullRequestTool(githubOwner, githubToken),
 	}
 

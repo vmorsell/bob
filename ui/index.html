@@ -426,6 +426,17 @@
       }
       .cc-content {
         padding: 10px 0;
+        max-height: 300px;
+        overflow-y: auto;
+      }
+      .cc-section.expanded .cc-content {
+        max-height: none;
+      }
+      .cc-section .cc-label {
+        cursor: pointer;
+      }
+      .cc-section-terminal .cc-text {
+        font-family: "SF Mono", "Fira Code", monospace;
       }
 
       /* Plain text line from Claude's reasoning */
@@ -696,6 +707,7 @@
         var slackURL = "";
         var toolIdx = 0;
         var ccIdx = -1;
+        var ccLabel = "Claude Code";
 
         function initJob(id) {
           document.title = "Job " + id.slice(0, 8) + " \u2013 Bob";
@@ -784,42 +796,28 @@
             if (mm) prLink = mm[0];
           }
 
-          // Claude Code output line — append to CC content block.
-          // The section is created lazily here so it appears after the
-          // tool_started row and any Slack notification, not before them.
+          // Claude Code output line — append to eagerly-created CC content block.
           if (ev.type === "claude_code_line") {
             var content = document.getElementById("cc-content-" + ccIdx);
-            if (!content && ccIdx >= 0) {
-              var ccList = document.getElementById("evlist");
-              if (ccList) {
-                var sec = document.createElement("div");
-                sec.className = "cc-section";
-                sec.innerHTML =
-                  '<div class="cc-label">Claude Code</div>' +
-                  '<div class="cc-content" id="cc-content-' +
-                  ccIdx +
-                  '"></div>';
-                ccList.appendChild(sec);
-                content = document.getElementById("cc-content-" + ccIdx);
-              }
-            }
             if (content) {
               var item = makeCCItem(d);
               if (item) {
                 content.appendChild(item);
+                content.scrollTop = content.scrollHeight;
                 if (autoScroll) window.scrollTo(0, document.body.scrollHeight);
               }
             }
             return;
           }
 
-          // Track when implement_changes starts; CC section is created lazily
-          // on the first claude_code_line so ordering in the UI is correct.
+          // Track when implement_changes or run_tests starts; the cc-section
+          // is eagerly created right after the tool_started row below.
           if (
             ev.type === "tool_started" &&
-            d.tool_name === "implement_changes"
+            (d.tool_name === "implement_changes" || d.tool_name === "run_tests")
           ) {
             ccIdx = toolIdx;
+            ccLabel = d.tool_name === "run_tests" ? "Test Output" : "Claude Code";
           }
           if (ev.type === "tool_completed") toolIdx++;
 
@@ -861,6 +859,32 @@
             "</div>" +
             (hasBody ? '<div class="ev-body">' + body + "</div>" : "");
           list.appendChild(el);
+
+          // Eagerly create cc-section right after the tool_started row so
+          // output lines always appear directly below the tool call.
+          if (
+            ev.type === "tool_started" &&
+            (d.tool_name === "implement_changes" || d.tool_name === "run_tests")
+          ) {
+            var sec = document.createElement("div");
+            sec.className =
+              "cc-section" +
+              (d.tool_name === "run_tests" ? " cc-section-terminal" : "");
+            sec.innerHTML =
+              '<div class="cc-label">' +
+              h(ccLabel) +
+              "</div>" +
+              '<div class="cc-content" id="cc-content-' +
+              ccIdx +
+              '"></div>';
+            sec.querySelector(".cc-label").addEventListener(
+              "click",
+              function () {
+                sec.classList.toggle("expanded");
+              },
+            );
+            list.insertBefore(sec, el.nextSibling);
+          }
         }
 
         // ── Claude Code item rendering ────────────────────────────────────────────────
