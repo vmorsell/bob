@@ -10,10 +10,11 @@ import (
 type ctxKey int
 
 const (
-	ctxKeyChannel  ctxKey = iota
-	ctxKeyThreadTS ctxKey = iota
-	ctxKeyJobID    ctxKey = iota
-	ctxKeyHub      ctxKey = iota
+	ctxKeyChannel   ctxKey = iota
+	ctxKeyThreadTS  ctxKey = iota
+	ctxKeyJobID     ctxKey = iota
+	ctxKeyHub       ctxKey = iota
+	ctxKeyMentionTS ctxKey = iota
 )
 
 // WithSlackThread returns a context carrying the Slack channel and thread timestamp.
@@ -32,6 +33,12 @@ func WithJobID(ctx context.Context, jobID string) context.Context {
 func JobIDFromCtx(ctx context.Context) string {
 	v, _ := ctx.Value(ctxKeyJobID).(string)
 	return v
+}
+
+// WithMentionTS returns a context carrying the timestamp of the Slack message
+// that triggered the mention (where the "working" reaction lives).
+func WithMentionTS(ctx context.Context, ts string) context.Context {
+	return context.WithValue(ctx, ctxKeyMentionTS, ts)
 }
 
 // WithHub returns a context carrying the monitoring Hub.
@@ -61,6 +68,11 @@ func (n *SlackNotifier) Notify(ctx context.Context, text string) {
 	threadTS, _ := ctx.Value(ctxKeyThreadTS).(string)
 	if channel == "" || threadTS == "" {
 		return
+	}
+
+	// Remove the "working" reaction before the first reply appears.
+	if mentionTS, _ := ctx.Value(ctxKeyMentionTS).(string); mentionTS != "" {
+		removeReaction(n.client, channel, mentionTS)
 	}
 
 	// Emit monitoring event before posting.

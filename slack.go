@@ -118,6 +118,7 @@ func handleMention(client *slack.Client, llm LLM, botUserID string, hub *Hub, ev
 	// Inject Slack context and hub so tools can send notifications mid-execution.
 	// jobID is generated lazily in Respond() on the first tool_use.
 	ctx := WithSlackThread(context.Background(), ev.Channel, threadTS)
+	ctx = WithMentionTS(ctx, ev.TimeStamp)
 	ctx = WithHub(ctx, hub)
 
 	resp, err := llm.Respond(ctx, messages)
@@ -126,12 +127,7 @@ func handleMention(client *slack.Client, llm LLM, botUserID string, hub *Hub, ev
 		resp = "Sorry, I hit an error trying to respond. Please try again."
 	}
 
-	if err := client.RemoveReaction("construction_worker", slack.ItemRef{
-		Channel:   ev.Channel,
-		Timestamp: ev.TimeStamp,
-	}); err != nil {
-		log.Printf("failed to remove reaction: %v", err)
-	}
+	removeReaction(client, ev.Channel, ev.TimeStamp)
 
 	_, _, err = client.PostMessage(ev.Channel,
 		slack.MsgOptionText(fmt.Sprintf("<@%s> %s", ev.User, resp), false),
@@ -139,6 +135,23 @@ func handleMention(client *slack.Client, llm LLM, botUserID string, hub *Hub, ev
 	)
 	if err != nil {
 		log.Printf("failed to post message: %v", err)
+	}
+}
+
+func removeReaction(client *slack.Client, channel, timestamp string) {
+	ref := slack.ItemRef{Channel: channel, Timestamp: timestamp}
+	reactions, err := client.GetReactions(ref, slack.NewGetReactionsParameters())
+	if err != nil {
+		log.Printf("failed to get reactions for removal: %v", err)
+		return
+	}
+	for _, r := range reactions {
+		if strings.Contains(r.Name, "construction") {
+			if err := client.RemoveReaction(r.Name, ref); err != nil {
+				log.Printf("failed to remove reaction %q: %v", r.Name, err)
+			}
+			return
+		}
 	}
 }
 
