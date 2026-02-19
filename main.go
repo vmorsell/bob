@@ -40,20 +40,20 @@ func main() {
 	tools := []Tool{
 		ListReposTool(githubOwner, githubToken),
 		CloneRepoTool(githubOwner, githubToken),
-		ImplementChangesTool(githubOwner, claudeCodeToken, notifier),
-		RunTestsTool(githubOwner, notifier),
+		ImplementChangesTool(githubOwner, claudeCodeToken),
+		RunTestsTool(githubOwner),
 		CreatePullRequestTool(githubOwner, githubToken),
 	}
 
 	onJobStart := func(ctx context.Context, jobID string) {
 		msg := "On it!"
 		if bobURL != "" {
-			msg = fmt.Sprintf("On it! Follow my progress <%s/jobs/%s|here>.", bobURL, jobID)
+			msg = fmt.Sprintf("On it! Follow my progress here: <%s/jobs/%s>", bobURL, jobID)
 		}
 		notifier.Notify(ctx, msg)
 	}
 
-	llm := NewAnthropicLLM(anthropicKey, tools, hub, onJobStart)
+	llm := NewAnthropicLLM(anthropicKey, tools, hub, onJobStart, notifier)
 
 	mux := http.NewServeMux()
 	mux.Handle("/webhooks/slack", NewSlackHandler(slackClient, signingSecret, llm, hub))

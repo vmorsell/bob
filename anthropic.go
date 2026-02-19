@@ -48,9 +48,10 @@ type AnthropicLLM struct {
 	toolFn     map[string]func(ctx context.Context, input json.RawMessage) (string, error)
 	hub        *Hub
 	onJobStart func(ctx context.Context, jobID string)
+	notifier   *SlackNotifier
 }
 
-func NewAnthropicLLM(apiKey string, tools []Tool, hub *Hub, onJobStart func(context.Context, string)) *AnthropicLLM {
+func NewAnthropicLLM(apiKey string, tools []Tool, hub *Hub, onJobStart func(context.Context, string), notifier *SlackNotifier) *AnthropicLLM {
 	client := anthropic.NewClient(option.WithAPIKey(apiKey))
 
 	sdkTools := make([]anthropic.ToolUnionParam, 0, len(tools)+1)
@@ -89,6 +90,7 @@ func NewAnthropicLLM(apiKey string, tools []Tool, hub *Hub, onJobStart func(cont
 		toolFn:     toolFn,
 		hub:        hub,
 		onJobStart: onJobStart,
+		notifier:   notifier,
 	}
 }
 
@@ -106,6 +108,7 @@ func (a *AnthropicLLM) Respond(ctx context.Context, messages []Message) (string,
 
 	jobID := ""
 	startTime := time.Now()
+	lastNotification := ""
 
 	for iter := range maxToolIterations {
 		// Emit LLMCall before each API call (only after job is created).
@@ -184,6 +187,45 @@ func (a *AnthropicLLM) Respond(ctx context.Context, messages []Message) (string,
 				"summary":     summary,
 			})
 			break
+		}
+
+		// Stage-transition notification: post the model's reasoning to Slack when
+		// entering a major execution stage.
+		majorFallbacks := map[string]string{
+			"implement_changes":   "Implementing changes...",
+			"run_tests":           "Running tests...",
+			"create_pull_request": "Creating pull request...",
+		}
+		if jobID != "" && a.notifier != nil {
+			var reasoning string
+			for _, block := range resp.Content {
+				if tb, ok := block.AsAny().(anthropic.TextBlock); ok && tb.Text != "" {
+					reasoning = strings.TrimSpace(tb.Text)
+					break
+				}
+			}
+			for _, block := range resp.Content {
+				variant, ok := block.AsAny().(anthropic.ToolUseBlock)
+				if !ok {
+					continue
+				}
+				fallback, isMajor := majorFallbacks[variant.Name]
+				if !isMajor {
+					continue
+				}
+				msg := reasoning
+				if msg == "" {
+					msg = fallback
+				} else {
+					msg = truncate(msg, 400)
+				}
+				if msg == lastNotification {
+					break
+				}
+				a.notifier.Notify(ctx, msg)
+				lastNotification = msg
+				break // one notification per LLM iteration
+			}
 		}
 
 		// Execute each tool call with monitoring context.

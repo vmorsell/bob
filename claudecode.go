@@ -18,7 +18,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 )
 
-func ImplementChangesTool(owner, claudeCodeToken string, notifier *SlackNotifier) Tool {
+func ImplementChangesTool(owner, claudeCodeToken string) Tool {
 	// Track which repo+job combos have already had a Claude Code session.
 	// Key: "jobID:repoName", Value: true
 	var sessions sync.Map
@@ -70,13 +70,6 @@ func ImplementChangesTool(owner, claudeCodeToken string, notifier *SlackNotifier
 				if out, err := resetCmd.CombinedOutput(); err != nil {
 					return "", fmt.Errorf("git reset failed: %s: %w", out, err)
 				}
-			}
-
-			// Ack to Slack.
-			if isRetry {
-				notifier.Notify(ctx, fmt.Sprintf("Retrying implementation in `%s/%s` (continuing previous session)...", owner, repoName))
-			} else {
-				notifier.Notify(ctx, fmt.Sprintf("Working on implementing changes in `%s/%s`...", owner, repoName))
 			}
 
 			// Run Claude Code CLI with a 15 minute timeout.
