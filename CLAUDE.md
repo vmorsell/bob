@@ -16,8 +16,6 @@ docker compose up --build
 go build -o bob .
 ```
 
-There are no tests or linting configured yet.
-
 ## Architecture
 
 Two-service Docker Compose setup:
@@ -60,15 +58,3 @@ The web UI at the tunnel root lists all jobs; `/jobs/{id}` shows the live event 
 New webhook sources (Linear, GitHub, etc.) get their own `<source>.go` file and `/webhooks/<source>` route.
 
 New LLM providers get their own `<provider>.go` file implementing the `LLM` interface.
-
-## Environment variables
-
-Defined in `.env` (gitignored), passed to containers via `compose.yaml`:
-
-- `SLACK_BOT_TOKEN` — Bot User OAuth Token (`xoxb-...`)
-- `SLACK_SIGNING_SECRET` — For verifying incoming Slack requests
-- `ANTHROPIC_API_KEY` — Anthropic API key for LLM responses
-- `GITHUB_TOKEN` — GitHub personal access token for repo access
-- `GITHUB_OWNER` — GitHub owner (organization or personal username) to search/clone from
-- `CLAUDE_CODE_OAUTH_TOKEN` — OAuth token for Claude Code CLI (used by `implement_changes` tool)
-- `CLOUDFLARED_TOKEN` — Cloudflare tunnel token
