@@ -29,14 +29,15 @@ A named `workspace` volume is mounted at `/workspace` for persistent repo clones
 
 Go code is split by webhook source for extensibility:
 
-- `main.go` — HTTP mux, routes mounted at `/webhooks/<source>`, wires up dependencies and tools
+- `main.go` — HTTP mux, routes mounted at `/webhooks/<source>` and `/jobs/`, `/api/jobs`, `/events`; wires up dependencies and tools
 - `slack.go` — Slack handler: signature verification, `url_verification` challenge, `app_mention` event handling with thread context
 - `llm.go` — `LLM` interface and `Message`/`Role` types (adapter pattern)
-- `anthropic.go` — Anthropic adapter implementing `LLM` using Claude Sonnet via `anthropic-sdk-go`, with tool use loop
+- `anthropic.go` — Anthropic adapter implementing `LLM` using Claude Sonnet via `anthropic-sdk-go`, with tool use loop and monitoring event emission
 - `tool.go` — `Tool` type bridging tool definitions and the Anthropic adapter
 - `git.go` — GitHub tools: `list_repos` (search org repos via GitHub REST API) and `clone_repo` (shallow clone to `/workspace`)
-- `claudecode.go` — `implement_changes` (run Claude Code CLI on a cloned repo) and `create_pull_request` (commit, push, open PR via GitHub API)
-- `notify.go` — `SlackNotifier` for tools to post mid-execution messages to the originating Slack thread via context
+- `claudecode.go` — `implement_changes` (run Claude Code CLI on a cloned repo, streaming output via `streamingWriter`) and `create_pull_request` (commit, push, open PR via GitHub API)
+- `notify.go` — `SlackNotifier` for tools to post mid-execution messages; context keys for channel, threadTS, jobID, and hub
+- `monitor.go` — `Hub` (SSE fan-out + JSONL persistence), event types, `streamingWriter`, REST handlers (`/api/jobs`, `/api/jobs/{id}`), SSE handler (`/events`), and dark-terminal web UI served at `/` and `/jobs/{id}`
 
 ### Tool use pattern
 
@@ -44,9 +45,17 @@ The Anthropic adapter accepts a `[]Tool` at construction. During `Respond`, it r
 
 New tools: create a constructor returning `Tool` (closing over config), register it in `main.go`.
 
+### Monitoring pattern
+
+On the **first `tool_use`** in `Respond()`, a UUID job ID is generated and a monitoring job is created in the `Hub`. Bob posts a Slack message with the job ID via `onJobStart`. All subsequent tool calls, LLM iterations, Claude Code output lines, and Slack notifications are emitted as `Event` values and:
+1. Persisted to `/workspace/.bob/{jobID}.jsonl` (one JSON line per event)
+2. Fanned out to any connected SSE clients (`/events?job={id}`)
+
+The web UI at the tunnel root lists all jobs; `/jobs/{id}` shows the live event stream. Pure-text LLM responses (no tool use) produce no job and no Slack link.
+
 ### Notifier pattern
 
-`SlackNotifier` wraps the Slack client and reads channel/threadTS from context (injected by `slack.go`). Tools receive it at construction and call `notifier.Notify(ctx, text)` to post progress messages mid-execution. It no-ops if context values are missing.
+`SlackNotifier` wraps the Slack client and reads channel/threadTS from context (injected by `slack.go`). Tools receive it at construction and call `notifier.Notify(ctx, text)` to post progress messages mid-execution. It also emits `EventSlackNotification` to the hub if jobID is in context. It no-ops if context values are missing.
 
 New webhook sources (Linear, GitHub, etc.) get their own `<source>.go` file and `/webhooks/<source>` route.
 

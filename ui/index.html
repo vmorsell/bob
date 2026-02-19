@@ -1,0 +1,1165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bob</title>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      :root {
+        --bg: #09090e;
+        --s1: #0f0f16;
+        --s2: #14141d;
+        --s3: #1a1a25;
+        --border: #1e1e2c;
+        --border2: #252535;
+        --text: #e4e4f0;
+        --sub: #9090a8;
+        --dim: #4a4a62;
+        --blue: #5b8ef0;
+        --blue-bg: rgba(91, 142, 240, 0.08);
+        --blue-border: rgba(91, 142, 240, 0.2);
+        --purple: #9d7ef5;
+        --purple-bg: rgba(157, 126, 245, 0.08);
+        --green: #2dd4a0;
+        --green-bg: rgba(45, 212, 160, 0.08);
+        --green-border: rgba(45, 212, 160, 0.2);
+        --orange: #f5923e;
+        --orange-bg: rgba(245, 146, 62, 0.08);
+        --red: #f06060;
+        --red-bg: rgba(240, 96, 96, 0.08);
+        --cyan: #4fd1c7;
+        --cyan-bg: rgba(79, 209, 199, 0.08);
+      }
+
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+        font-size: 14px;
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      a {
+        color: var(--blue);
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+
+      /* Nav */
+      nav {
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        padding: 14px 28px;
+        gap: 10px;
+        background: var(--s1);
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        backdrop-filter: blur(8px);
+      }
+      .nav-brand {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+        font-size: 1.67em;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+        color: var(--text);
+        line-height: 1;
+      }
+      .nav-brand:hover {
+        color: #fff;
+      }
+      .nav-brand .logo-emoji {
+        font-size: 1.1em;
+        line-height: 1;
+        position: relative;
+        top: 1px;
+      }
+
+      /* Page */
+      .page {
+        max-width: 840px;
+        margin: 0 auto;
+        padding: 36px 28px 80px;
+      }
+
+      .page-head {
+        margin-bottom: 28px;
+      }
+      .page-title {
+        font-size: 20px;
+        font-weight: 600;
+        margin-bottom: 3px;
+      }
+      .page-sub {
+        color: var(--sub);
+        font-size: 13px;
+      }
+
+      .placeholder {
+        color: var(--dim);
+        text-align: center;
+        padding: 72px 0;
+        font-size: 14px;
+      }
+
+      /* ── Overview job list ── */
+      .job-list {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+      }
+
+      .job-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 13px 16px;
+        background: var(--s1);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        cursor: pointer;
+        transition:
+          background 0.1s,
+          border-color 0.15s;
+      }
+      .job-row:hover {
+        background: var(--s2);
+        border-color: var(--border2);
+      }
+
+      .status-pip {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+      .pip-running {
+        background: var(--blue);
+        box-shadow: 0 0 6px var(--blue);
+        animation: glow 2s ease-in-out infinite;
+      }
+      .pip-completed {
+        background: var(--green);
+      }
+      .pip-error {
+        background: var(--red);
+      }
+
+      @keyframes glow {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+      }
+
+      .job-row-task {
+        flex: 1;
+        font-size: 13px;
+        color: var(--text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .job-row-time {
+        font-size: 12px;
+        color: var(--sub);
+        white-space: nowrap;
+      }
+      .job-row-id {
+        font-size: 11px;
+        color: var(--dim);
+        font-family: "SF Mono", "Fira Code", monospace;
+        white-space: nowrap;
+      }
+      .job-row-arrow {
+        color: var(--dim);
+        font-size: 14px;
+        margin-left: 2px;
+      }
+
+      /* ── Job header ── */
+      .job-hdr {
+        background: var(--s1);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 24px 26px;
+        margin-bottom: 20px;
+      }
+      .job-hdr-title {
+        font-size: 17px;
+        font-weight: 600;
+        line-height: 1.4;
+        margin-bottom: 14px;
+        color: var(--text);
+      }
+      .job-hdr-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 4px 11px;
+        border-radius: 5px;
+        font-size: 12px;
+        font-weight: 500;
+        background: var(--s2);
+        border: 1px solid var(--border2);
+        color: var(--sub);
+      }
+      .chip-a {
+        color: var(--blue);
+        background: var(--blue-bg);
+        border-color: var(--blue-border);
+        cursor: pointer;
+      }
+      .chip-a:hover {
+        border-color: var(--blue);
+        text-decoration: none;
+        color: var(--blue);
+      }
+      .chip-pr {
+        color: var(--green);
+        background: var(--green-bg);
+        border-color: var(--green-border);
+        cursor: pointer;
+      }
+      .chip-pr:hover {
+        border-color: var(--green);
+        text-decoration: none;
+      }
+
+      /* Live bar */
+      .live-bar {
+        display: none;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 18px;
+        padding: 9px 14px;
+        background: var(--green-bg);
+        border: 1px solid var(--green-border);
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--green);
+      }
+      .live-pip {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--green);
+        animation: glow 1.5s ease-in-out infinite;
+      }
+
+      /* ── Event list ── */
+      .ev-list {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+      }
+
+      .ev {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--s1);
+        overflow: hidden;
+      }
+
+      .ev-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 9px 13px;
+        cursor: pointer;
+        transition: background 0.1s;
+        min-height: 38px;
+      }
+      .ev-row:hover {
+        background: var(--s2);
+      }
+      .ev-row.static {
+        cursor: default;
+      }
+      .ev-row.static:hover {
+        background: transparent;
+      }
+
+      /* Tag pill */
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 7px;
+        border-radius: 4px;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        white-space: nowrap;
+        flex-shrink: 0;
+        min-width: 90px;
+        justify-content: center;
+      }
+      .tag-job {
+        background: var(--blue-bg);
+        color: var(--blue);
+      }
+      .tag-done {
+        background: var(--green-bg);
+        color: var(--green);
+      }
+      .tag-err {
+        background: var(--red-bg);
+        color: var(--red);
+      }
+      .tag-llm {
+        background: var(--purple-bg);
+        color: var(--purple);
+      }
+      .tag-tool {
+        background: var(--orange-bg);
+        color: var(--orange);
+      }
+      .tag-slack {
+        background: var(--cyan-bg);
+        color: var(--cyan);
+      }
+
+      .ev-name {
+        font-size: 13px;
+        color: var(--sub);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        flex: 1;
+      }
+      .ev-name strong {
+        color: var(--text);
+        font-weight: 500;
+      }
+      .ev-ok {
+        color: var(--green);
+      }
+      .ev-err {
+        color: var(--red);
+      }
+
+      .dur {
+        font-size: 11px;
+        color: var(--dim);
+        font-family: "SF Mono", "Fira Code", monospace;
+        white-space: nowrap;
+      }
+
+      .ev-time {
+        font-size: 11px;
+        color: var(--dim);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+
+      .ev-caret {
+        color: var(--dim);
+        font-size: 11px;
+        flex-shrink: 0;
+        transition: transform 0.15s;
+      }
+      .ev.open .ev-caret {
+        transform: rotate(90deg);
+      }
+
+      /* Body */
+      .ev-body {
+        border-top: 1px solid var(--border);
+        padding: 12px 14px;
+        font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+        font-size: 12px;
+        line-height: 1.65;
+        color: var(--sub);
+        white-space: pre-wrap;
+        word-break: break-all;
+        background: var(--bg);
+      }
+      .ev.closed .ev-body {
+        display: none;
+      }
+
+      /* ── Claude Code output ── */
+      .cc-section {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+        margin: 16px 0;
+        background: var(--bg);
+      }
+      .cc-label {
+        padding: 7px 14px;
+        background: var(--s1);
+        border-bottom: 1px solid var(--border);
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--dim);
+      }
+      .cc-content {
+        padding: 10px 0;
+      }
+
+      /* Plain text line from Claude's reasoning */
+      .cc-text {
+        padding: 3px 14px;
+        font-size: 13px;
+        color: var(--sub);
+        line-height: 1.65;
+      }
+      .cc-text + .cc-text {
+        margin-top: 4px;
+      }
+
+      /* Simple tool row (Read, Glob, Bash, …) */
+      .cc-row {
+        display: flex;
+        align-items: baseline;
+        gap: 7px;
+        padding: 3px 14px;
+        font-family: "SF Mono", "Fira Code", monospace;
+        font-size: 11px;
+      }
+      .cc-arrow {
+        color: var(--dim);
+      }
+      .cc-nm {
+        color: var(--sub);
+        font-weight: 600;
+        min-width: 46px;
+      }
+      .cc-arg {
+        color: var(--dim);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      /* Diff block (Edit / Write) */
+      .cc-diff {
+        margin: 10px 14px;
+        border-radius: 5px;
+        overflow: hidden;
+        font-family: "SF Mono", "Fira Code", monospace;
+        font-size: 11px;
+      }
+      .cc-diff-hdr {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 5px 10px;
+        background: var(--s2);
+        border: 1px solid var(--border);
+        border-radius: 5px 5px 0 0;
+      }
+      .cc-diff-path {
+        color: var(--text);
+        font-size: 11px;
+      }
+      .diff-lines {
+        border: 1px solid var(--border);
+        border-top: none;
+        border-radius: 0 0 5px 5px;
+        overflow: hidden;
+      }
+      .dl {
+        padding: 1px 10px;
+        white-space: pre;
+        overflow-x: auto;
+        line-height: 1.6;
+      }
+      .dl-del {
+        background: rgba(240, 96, 96, 0.07);
+        color: #c47070;
+      }
+      .dl-add {
+        background: rgba(45, 212, 160, 0.07);
+        color: #4daa80;
+      }
+      .dl-sep {
+        background: var(--s2);
+        color: var(--dim);
+        text-align: center;
+        padding: 2px 10px;
+      }
+
+      /* TodoWrite checklist */
+      .cc-todos {
+        margin: 10px 14px;
+        padding: 10px 14px;
+        border: 1px solid var(--border2);
+        border-radius: 6px;
+        background: var(--s2);
+      }
+      .cc-todo {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 4px 0;
+        font-size: 12px;
+        color: var(--sub);
+      }
+      .todo-i {
+        flex-shrink: 0;
+        font-size: 13px;
+        margin-top: 1px;
+        font-family: monospace;
+      }
+      .todo-pending .todo-i {
+        color: var(--dim);
+      }
+      .todo-in_progress .todo-i {
+        color: var(--blue);
+      }
+      .todo-completed .todo-i {
+        color: var(--green);
+      }
+      .todo-completed .todo-t {
+        text-decoration: line-through;
+        color: var(--dim);
+      }
+
+      /* Inline markdown inside cc-text */
+      .cc-text strong {
+        color: var(--text);
+        font-weight: 600;
+      }
+      .cc-text em {
+        font-style: italic;
+      }
+      .cc-code {
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid var(--border2);
+        border-radius: 3px;
+        padding: 1px 5px;
+        font-family: "SF Mono", "Fira Code", monospace;
+        font-size: 0.88em;
+        color: var(--text);
+      }
+      /* List items */
+      .cc-li {
+        display: flex;
+        align-items: baseline;
+        gap: 7px;
+        padding: 2px 14px;
+      }
+      .cc-li-sym {
+        color: var(--dim);
+        flex-shrink: 0;
+        font-size: 11px;
+        min-width: 14px;
+        text-align: right;
+      }
+      .cc-li .cc-li-sym {
+        padding-left: 0;
+      }
+
+      /* Scrollbar */
+      ::-webkit-scrollbar {
+        width: 5px;
+        height: 5px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: var(--border2);
+        border-radius: 3px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: var(--dim);
+      }
+    </style>
+  </head>
+  <body>
+    <nav>
+      <div class="nav-brand" onclick="location.href = '/'">
+        <span class="logo-emoji">👷</span>Bob
+      </div>
+    </nav>
+    <div class="page" id="app">
+      <div class="placeholder">Loading&hellip;</div>
+    </div>
+    <script>
+      (function () {
+        var path = window.location.pathname;
+        var m = path.match(/^\/jobs\/([^\/]+)/);
+        if (m) {
+          initJob(m[1]);
+        } else {
+          initOverview();
+        }
+
+        // ── Overview ─────────────────────────────────────────────────────────────────
+
+        function initOverview() {
+          document.title = "Bob";
+          loadJobs();
+          setInterval(loadJobs, 10000);
+        }
+
+        function loadJobs() {
+          fetch("/api/jobs")
+            .then(function (r) {
+              return r.json();
+            })
+            .then(renderOverview)
+            .catch(function () {
+              app('<div class="placeholder">Failed to load.</div>');
+            });
+        }
+
+        function renderOverview(jobs) {
+          if (!jobs || !jobs.length) {
+            app(
+              '<div class="placeholder">No jobs yet &mdash; mention Bob in Slack with a task to get started.</div>',
+            );
+            return;
+          }
+          var rows = jobs
+            .map(function (j) {
+              var pip = "pip-" + (j.status || "running");
+              var ago = relTime(j.started_at);
+              return (
+                '<div class="job-row" onclick="location.href=\'/jobs/' +
+                enc(j.id) +
+                "'\">" +
+                '<span class="status-pip ' +
+                pip +
+                '"></span>' +
+                '<span class="job-row-task">' +
+                h(j.task || "(untitled)") +
+                "</span>" +
+                '<span class="job-row-time">' +
+                ago +
+                "</span>" +
+                '<span class="job-row-id">' +
+                j.id.slice(0, 8) +
+                "</span>" +
+                '<span class="job-row-arrow">&#8250;</span>' +
+                "</div>"
+              );
+            })
+            .join("");
+          app(
+            '<div class="page-head">' +
+              '<h1 class="page-title">Jobs</h1>' +
+              '<p class="page-sub">' +
+              jobs.length +
+              " job" +
+              (jobs.length !== 1 ? "s" : "") +
+              "</p>" +
+              "</div>" +
+              '<div class="job-list">' +
+              rows +
+              "</div>",
+          );
+        }
+
+        // ── Job page ─────────────────────────────────────────────────────────────────
+
+        var autoScroll = true;
+        var prLink = null;
+        var taskText = "";
+        var slackURL = "";
+        var toolIdx = 0;
+        var ccIdx = -1;
+
+        function initJob(id) {
+          document.title = "Job " + id.slice(0, 8) + " \u2013 Bob";
+          app(
+            '<div id="jhdr" class="job-hdr"><div class="job-hdr-title" style="color:var(--dim)">Loading&hellip;</div></div>' +
+              '<div id="lbar" class="live-bar"><span class="live-pip"></span><span>Live</span></div>' +
+              '<div id="evlist" class="ev-list"></div>',
+          );
+
+          window.addEventListener("scroll", function () {
+            autoScroll =
+              window.scrollY + window.innerHeight >=
+              document.body.scrollHeight - 160;
+          });
+
+          fetch("/api/jobs/" + id)
+            .then(function (r) {
+              if (!r.ok) throw 0;
+              return r.json();
+            })
+            .then(function (evts) {
+              (evts || []).forEach(addEvt);
+              refreshHdr();
+              var es = new EventSource("/events?job=" + id);
+              document.getElementById("lbar").style.display = "flex";
+              es.onmessage = function (e) {
+                addEvt(JSON.parse(e.data));
+                refreshHdr();
+                if (autoScroll) window.scrollTo(0, document.body.scrollHeight);
+              };
+              es.onerror = function () {
+                document.getElementById("lbar").style.display = "none";
+              };
+            })
+            .catch(function () {
+              app('<div class="placeholder">Job not found.</div>');
+            });
+        }
+
+        function refreshHdr() {
+          var hdr = document.getElementById("jhdr");
+          if (!hdr) return;
+          var chips = "";
+          if (slackURL)
+            chips +=
+              '<a href="' +
+              h(slackURL) +
+              '" target="_blank" class="chip chip-a">&#8599; Slack thread</a>';
+          if (prLink)
+            chips +=
+              '<a href="' +
+              h(prLink) +
+              '" target="_blank" class="chip chip-pr">&#8594; View PR</a>';
+          hdr.innerHTML =
+            '<div class="job-hdr-title">' +
+            h(taskText || "Loading\u2026") +
+            "</div>" +
+            (chips ? '<div class="job-hdr-chips">' + chips + "</div>" : "");
+        }
+
+        function addEvt(ev) {
+          var d = ev.data || {};
+
+          if (ev.type === "job_started") {
+            taskText = d.task || "";
+            slackURL = d.slack_thread_url || "";
+          }
+          if (
+            ev.type === "tool_completed" &&
+            d.tool_name === "create_pull_request" &&
+            !d.is_error
+          ) {
+            var mm = (d.result_preview || "").match(
+              /https:\/\/github\.com\/[^\s]+\/pull\/\d+/,
+            );
+            if (mm) prLink = mm[0];
+          }
+
+          // Claude Code output line — append to CC content block.
+          if (ev.type === "claude_code_line") {
+            var content = document.getElementById("cc-content-" + ccIdx);
+            if (content) {
+              var item = makeCCItem(d);
+              if (item) {
+                content.appendChild(item);
+                if (autoScroll) window.scrollTo(0, document.body.scrollHeight);
+              }
+            }
+            return;
+          }
+
+          // Create CC output block when implement_changes starts.
+          if (
+            ev.type === "tool_started" &&
+            d.tool_name === "implement_changes"
+          ) {
+            ccIdx = toolIdx;
+            var list = document.getElementById("evlist");
+            if (list) {
+              var sec = document.createElement("div");
+              sec.className = "cc-section";
+              sec.innerHTML =
+                '<div class="cc-label">Claude Code</div>' +
+                '<div class="cc-content" id="cc-content-' +
+                ccIdx +
+                '"></div>';
+              list.appendChild(sec);
+            }
+          }
+          if (ev.type === "tool_completed") toolIdx++;
+
+          var list = document.getElementById("evlist");
+          if (!list) return;
+
+          var body = evBody(ev);
+          var hasBody = body !== "";
+          var tag = evTag(ev);
+          var name = evName(ev);
+          var durStr =
+            d.duration_ms !== undefined
+              ? '<span class="dur">' + d.duration_ms + "ms</span>"
+              : "";
+
+          var el = document.createElement("div");
+          el.className = "ev closed";
+          var rowCls = "ev-row" + (hasBody ? "" : " static");
+          var click = hasBody ? ' onclick="tog(this)"' : "";
+          el.innerHTML =
+            '<div class="' +
+            rowCls +
+            '"' +
+            click +
+            ">" +
+            '<span class="tag ' +
+            tag.c +
+            '">' +
+            tag.t +
+            "</span>" +
+            '<span class="ev-name">' +
+            name +
+            "</span>" +
+            durStr +
+            '<span class="ev-time">' +
+            fmtTs(ev.timestamp) +
+            "</span>" +
+            (hasBody ? '<span class="ev-caret">&#8250;</span>' : "") +
+            "</div>" +
+            (hasBody ? '<div class="ev-body">' + body + "</div>" : "");
+          list.appendChild(el);
+        }
+
+        // ── Claude Code item rendering ────────────────────────────────────────────────
+
+        function makeCCItem(d) {
+          if (d.tool_name) return makeToolItem(d);
+          var txt = (d.text || "").trimEnd();
+          if (!txt) return null;
+
+          var el = document.createElement("div");
+
+          // Unordered list item: "- text" or "* text"
+          var ul = txt.match(/^(\s*)[*\-]\s+(.+)$/);
+          if (ul) {
+            el.className = "cc-li";
+            el.style.paddingLeft = 14 + ul[1].length * 10 + "px";
+            el.innerHTML =
+              '<span class="cc-li-sym">•</span><span>' +
+              renderMd(ul[2]) +
+              "</span>";
+            return el;
+          }
+
+          // Ordered list item: "1. text"
+          var ol = txt.match(/^(\s*)(\d+)\.\s+(.+)$/);
+          if (ol) {
+            el.className = "cc-li";
+            el.style.paddingLeft = 14 + ol[1].length * 10 + "px";
+            el.innerHTML =
+              '<span class="cc-li-sym">' +
+              ol[2] +
+              ".</span><span>" +
+              renderMd(ol[3]) +
+              "</span>";
+            return el;
+          }
+
+          el.className = "cc-text";
+          el.innerHTML = renderMd(txt);
+          return el;
+        }
+
+        // Simple inline markdown: bold+code, bold, italic, backtick code.
+        function renderMd(raw) {
+          var s = h(raw);
+          // **code** combined with backtick spans
+          s = s.replace(
+            /\*\*\x60([^\x60]+)\x60\*\*/g,
+            '<strong><code class="cc-code">$1</code></strong>',
+          );
+          // **bold**
+          s = s.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+          // *italic*
+          s = s.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
+          // backtick code spans
+          s = s.replace(
+            /\x60([^\x60\n]+)\x60/g,
+            '<code class="cc-code">$1</code>',
+          );
+          return s;
+        }
+
+        function makeToolItem(d) {
+          var name = d.tool_name || "";
+          var input = {};
+          try {
+            input = JSON.parse(d.tool_input || "{}");
+          } catch (e) {}
+
+          if (name === "Edit" || name === "Write")
+            return makeDiffItem(name, input);
+          if (name === "TodoWrite") return makeTodosItem(input);
+
+          // Simple one-line tool row.
+          var arg = toolArg(name, input);
+          var el = document.createElement("div");
+          el.className = "cc-row";
+          el.innerHTML =
+            '<span class="cc-arrow">›</span>' +
+            '<span class="cc-nm">' +
+            h(name) +
+            "</span>" +
+            (arg ? '<span class="cc-arg">' + h(arg) + "</span>" : "");
+          return el;
+        }
+
+        function toolArg(name, input) {
+          var keys = [
+            "file_path",
+            "command",
+            "path",
+            "pattern",
+            "glob",
+            "query",
+            "description",
+          ];
+          for (var i = 0; i < keys.length; i++) {
+            var v = input[keys[i]];
+            if (typeof v === "string" && v) {
+              var s = v.replace(/^\/workspace\/[^\/]+\//, "");
+              return s.length > 72 ? s.slice(0, 72) + "\u2026" : s;
+            }
+          }
+          return "";
+        }
+
+        function makeDiffItem(toolName, input) {
+          var fp = input.file_path || "";
+          var short = fp.replace(/^\/workspace\/[^\/]+\//, "") || fp;
+          var oldS = input.old_string || "";
+          var newS = input.new_string || input.content || "";
+
+          var MAX = 24;
+          var oldLines = oldS.split("\n");
+          var newLines = newS.split("\n");
+          var oldOver = oldLines.length > MAX;
+          var newOver = newLines.length > MAX;
+          if (oldOver) oldLines = oldLines.slice(0, MAX);
+          if (newOver) newLines = newLines.slice(0, MAX);
+
+          var body = "";
+          oldLines.forEach(function (l) {
+            body += '<div class="dl dl-del">- ' + h(l) + "</div>";
+          });
+          if (oldOver)
+            body += '<div class="dl dl-sep">\u2026 truncated \u2026</div>';
+          newLines.forEach(function (l) {
+            body += '<div class="dl dl-add">+ ' + h(l) + "</div>";
+          });
+          if (newOver)
+            body += '<div class="dl dl-sep">\u2026 truncated \u2026</div>';
+
+          var el = document.createElement("div");
+          el.className = "cc-diff";
+          el.innerHTML =
+            '<div class="cc-diff-hdr">' +
+            '<span class="cc-arrow">›</span>' +
+            '<span class="cc-nm">' +
+            h(toolName) +
+            "</span>" +
+            '<span class="cc-diff-path">' +
+            h(short) +
+            "</span>" +
+            "</div>" +
+            '<div class="diff-lines">' +
+            body +
+            "</div>";
+          return el;
+        }
+
+        function makeTodosItem(input) {
+          var todos = input.todos || [];
+          if (!todos.length) return null;
+          var el = document.createElement("div");
+          el.className = "cc-todos";
+          todos.forEach(function (t) {
+            var status = t.status || "pending";
+            var icon =
+              status === "completed"
+                ? "\u2713"
+                : status === "in_progress"
+                  ? "\u25cf"
+                  : "\u25cb";
+            var row = document.createElement("div");
+            row.className = "cc-todo todo-" + status;
+            row.innerHTML =
+              '<span class="todo-i">' +
+              icon +
+              '</span><span class="todo-t">' +
+              h(t.content || "") +
+              "</span>";
+            el.appendChild(row);
+          });
+          return el;
+        }
+
+        // ─────────────────────────────────────────────────────────────────────────────
+
+        function evTag(ev) {
+          switch (ev.type) {
+            case "job_started":
+              return { c: "tag-job", t: "Job" };
+            case "job_completed":
+              return { c: "tag-done", t: "Done" };
+            case "job_error":
+              return { c: "tag-err", t: "Error" };
+            case "llm_call":
+              return { c: "tag-llm", t: "LLM Call" };
+            case "llm_response":
+              return { c: "tag-llm", t: "LLM" };
+            case "tool_started":
+              return { c: "tag-tool", t: "Tool" };
+            case "tool_completed":
+              return { c: "tag-tool", t: "Tool Done" };
+            case "slack_notification":
+              return { c: "tag-slack", t: "Slack" };
+            default:
+              return { c: "tag-job", t: ev.type };
+          }
+        }
+
+        function evName(ev) {
+          var d = ev.data || {};
+          switch (ev.type) {
+            case "job_started":
+              return h((d.task || "").slice(0, 90));
+            case "job_completed":
+              return (
+                '<span class="ev-ok">&#10003;</span> ' +
+                h((d.final_response || "Done").slice(0, 80))
+              );
+            case "job_error":
+              return (
+                '<span class="ev-err">&#10007;</span> ' +
+                h((d.error || "error").slice(0, 80))
+              );
+            case "llm_call":
+              return d.iteration !== undefined
+                ? "iteration " + d.iteration
+                : "";
+            case "llm_response":
+              return h((d.summary || d.stop_reason || "").slice(0, 90));
+            case "tool_started":
+              return "<strong>" + h(d.tool_name || "") + "</strong>";
+            case "tool_completed": {
+              var ok = d.is_error
+                ? '<span class="ev-err">&#10007; error</span>'
+                : '<span class="ev-ok">&#10003;</span>';
+              return "<strong>" + h(d.tool_name || "") + "</strong>  " + ok;
+            }
+            case "slack_notification":
+              return h((d.text || "").slice(0, 90));
+            default:
+              return h(ev.type);
+          }
+        }
+
+        function evBody(ev) {
+          var d = ev.data || {};
+          switch (ev.type) {
+            case "tool_started": {
+              if (!d.input) return "";
+              var inp = d.input;
+              try {
+                inp = JSON.stringify(JSON.parse(d.input), null, 2);
+              } catch (e) {}
+              return h(inp);
+            }
+            case "tool_completed": {
+              if (!d.result_preview) return "";
+              return d.is_error
+                ? '<span style="color:var(--red)">' +
+                    h(d.result_preview) +
+                    "</span>"
+                : h(d.result_preview);
+            }
+            case "llm_response":
+              return d.summary ? h(d.summary) : "";
+            case "job_started": {
+              var parts = [];
+              if (d.task) parts.push("Task     " + d.task);
+              if (d.slack_thread_url)
+                parts.push("Slack    " + d.slack_thread_url);
+              if (d.channel) parts.push("Channel  " + d.channel);
+              return parts.length ? h(parts.join("\n")) : "";
+            }
+            case "job_completed":
+              return d.final_response ? h(d.final_response) : "";
+            case "job_error":
+              return d.error
+                ? '<span style="color:var(--red)">' + h(d.error) + "</span>"
+                : "";
+            default:
+              return "";
+          }
+        }
+
+        function tog(row) {
+          var ev = row.closest(".ev");
+          ev.classList.toggle("closed");
+          ev.classList.toggle("open");
+        }
+        window.tog = tog;
+
+        // ── Helpers ───────────────────────────────────────────────────────────────────
+
+        function app(html) {
+          document.getElementById("app").innerHTML = html;
+        }
+
+        function h(s) {
+          return String(s)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;");
+        }
+
+        function enc(s) {
+          return encodeURIComponent(String(s));
+        }
+
+        function fmtTs(ts) {
+          if (!ts) return "";
+          return new Date(ts).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+          });
+        }
+
+        function relTime(ts) {
+          if (!ts) return "";
+          var diff = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+          if (diff < 60) return diff + "s ago";
+          if (diff < 3600) return Math.floor(diff / 60) + "m ago";
+          if (diff < 86400) return Math.floor(diff / 3600) + "h ago";
+          return Math.floor(diff / 86400) + "d ago";
+        }
+      })();
+    </script>
+  </body>
+</html>

@@ -16,7 +16,7 @@ import (
 
 var mentionRe = regexp.MustCompile(`<@[A-Z0-9]+>\s*`)
 
-func NewSlackHandler(client *slack.Client, signingSecret string, llm LLM) http.Handler {
+func NewSlackHandler(client *slack.Client, signingSecret string, llm LLM, hub *Hub) http.Handler {
 	// Get our own bot user ID so we can identify our messages in threads.
 	authResp, err := client.AuthTest()
 	if err != nil {
@@ -75,13 +75,13 @@ func NewSlackHandler(client *slack.Client, signingSecret string, llm LLM) http.H
 				log.Printf("app_mention from %s in %s: %s", ev.User, ev.Channel, ev.Text)
 
 				// Respond async so Slack gets a timely 200 OK.
-				go handleMention(client, llm, botUserID, ev)
+				go handleMention(client, llm, botUserID, hub, ev)
 			}
 		}
 	})
 }
 
-func handleMention(client *slack.Client, llm LLM, botUserID string, ev *slackevents.AppMentionEvent) {
+func handleMention(client *slack.Client, llm LLM, botUserID string, hub *Hub, ev *slackevents.AppMentionEvent) {
 	var messages []Message
 
 	if ev.ThreadTimeStamp != "" {
@@ -107,8 +107,10 @@ func handleMention(client *slack.Client, llm LLM, botUserID string, ev *slackeve
 		threadTS = ev.TimeStamp
 	}
 
-	// Inject Slack context so tools can send notifications mid-execution.
+	// Inject Slack context and hub so tools can send notifications mid-execution.
+	// jobID is generated lazily in Respond() on the first tool_use.
 	ctx := WithSlackThread(context.Background(), ev.Channel, threadTS)
+	ctx = WithHub(ctx, hub)
 
 	resp, err := llm.Respond(ctx, messages)
 	if err != nil {

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -75,14 +76,22 @@ func ImplementChangesTool(claudeCodeToken string, notifier *SlackNotifier) Tool 
 				return "", fmt.Errorf("chown failed: %s: %w", out, err)
 			}
 
-			cmd := exec.CommandContext(cliCtx, "claude", "-p", params.Task, "--dangerously-skip-permissions")
+			// stream-json emits one JSON object per line as each step happens,
+			// giving us real-time reasoning and tool-call visibility.
+			cmd := exec.CommandContext(cliCtx, "claude", "-p", params.Task,
+				"--output-format", "stream-json",
+				"--verbose",
+				"--dangerously-skip-permissions")
 			cmd.Dir = repoDir
 			cmd.Env = append(os.Environ(), "CLAUDE_CODE_OAUTH_TOKEN="+claudeCodeToken, "HOME=/home/worker")
 			cmd.SysProcAttr = &syscall.SysProcAttr{
 				Credential: &syscall.Credential{Uid: 1000, Gid: 1000},
 			}
 
-			output, err := cmd.CombinedOutput()
+			sp := newClaudeStreamParser(HubFromCtx(ctx), JobIDFromCtx(ctx))
+			cmd.Stdout = sp
+			cmd.Stderr = sp
+			runErr := cmd.Run()
 
 			// Chown back to root so subsequent git commands work.
 			chownBack := exec.CommandContext(cliCtx, "chown", "-R", "0:0", repoDir)
@@ -90,8 +99,8 @@ func ImplementChangesTool(claudeCodeToken string, notifier *SlackNotifier) Tool 
 				return "", fmt.Errorf("chown back failed: %s: %w", out, chownErr)
 			}
 
-			if err != nil {
-				return "", fmt.Errorf("claude code failed: %s: %w", truncate(string(output), 500), err)
+			if runErr != nil {
+				return "", fmt.Errorf("claude code failed: %s: %w", truncate(sp.raw.String(), 500), runErr)
 			}
 
 			// Check if any changes were made.
@@ -105,14 +114,161 @@ func ImplementChangesTool(claudeCodeToken string, notifier *SlackNotifier) Tool 
 				return "No changes were made.", nil
 			}
 
-			// Truncate output to 50KB.
-			result := string(output)
+			// Return the clean result text (or fall back to raw output).
+			result := sp.output()
 			if len(result) > 50*1024 {
 				result = result[:50*1024] + "\n... (output truncated)"
 			}
 			return result, nil
 		},
 	}
+}
+
+// claudeStreamParser parses the --output-format stream-json output from the
+// Claude Code CLI, emitting real-time hub events for each reasoning step and
+// tool call, while also collecting the final result text.
+type claudeStreamParser struct {
+	hub     *Hub
+	jobID   string
+	lineBuf []byte
+	raw     bytes.Buffer // full raw bytes, for error messages
+	result  string       // text from the final "result" event
+}
+
+func newClaudeStreamParser(hub *Hub, jobID string) *claudeStreamParser {
+	return &claudeStreamParser{hub: hub, jobID: jobID}
+}
+
+func (p *claudeStreamParser) Write(data []byte) (int, error) {
+	p.raw.Write(data)
+	for _, b := range data {
+		if b == '\n' {
+			p.processLine(string(p.lineBuf))
+			p.lineBuf = p.lineBuf[:0]
+		} else {
+			p.lineBuf = append(p.lineBuf, b)
+		}
+	}
+	return len(data), nil
+}
+
+func (p *claudeStreamParser) output() string {
+	if p.result != "" {
+		return p.result
+	}
+	return p.raw.String()
+}
+
+// claudeStreamEvent covers the shapes we care about from --output-format stream-json.
+type claudeStreamEvent struct {
+	Type    string `json:"type"`
+	Subtype string `json:"subtype"`
+	Message struct {
+		Role    string            `json:"role"`
+		Content []json.RawMessage `json:"content"`
+	} `json:"message"`
+	Result string `json:"result"` // populated on type=result
+	Error  string `json:"error"`  // populated on type=result,subtype=error
+}
+
+type claudeContentBlock struct {
+	Type  string          `json:"type"`
+	Text  string          `json:"text"`
+	Name  string          `json:"name"`
+	Input json.RawMessage `json:"input"`
+}
+
+func (p *claudeStreamParser) processLine(line string) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return
+	}
+
+	var evt claudeStreamEvent
+	if err := json.Unmarshal([]byte(line), &evt); err != nil {
+		// Not JSON (e.g. stderr noise) — emit verbatim.
+		p.emit(line)
+		return
+	}
+
+	switch evt.Type {
+	case "system":
+		// init metadata — skip
+	case "assistant":
+		for _, raw := range evt.Message.Content {
+			var block claudeContentBlock
+			if err := json.Unmarshal(raw, &block); err != nil {
+				continue
+			}
+			switch block.Type {
+			case "text":
+				for _, textLine := range strings.Split(block.Text, "\n") {
+					if strings.TrimSpace(textLine) != "" {
+						p.emit(textLine)
+					}
+				}
+			case "tool_use":
+				p.emitTool(block.Name, block.Input)
+			}
+		}
+	case "user":
+		// tool results — skip to keep output clean
+	case "result":
+		if evt.Subtype == "error" && evt.Error != "" {
+			p.result = evt.Error
+		} else {
+			p.result = evt.Result
+		}
+		// Emit the final summary as the last lines.
+		for _, textLine := range strings.Split(p.result, "\n") {
+			if strings.TrimSpace(textLine) != "" {
+				p.emit(textLine)
+			}
+		}
+	}
+}
+
+func (p *claudeStreamParser) emit(text string) {
+	if p.hub == nil || p.jobID == "" {
+		return
+	}
+	p.hub.Emit(p.jobID, EventClaudeCodeLine, map[string]any{"text": text})
+}
+
+// emitTool emits a claude_code_line event carrying the full tool input so the
+// UI can render rich diffs (Edit/Write) and checklists (TodoWrite).
+func (p *claudeStreamParser) emitTool(name string, input json.RawMessage) {
+	if p.hub == nil || p.jobID == "" {
+		return
+	}
+	inputStr := ""
+	if len(input) > 0 {
+		inputStr = string(input)
+	}
+	p.hub.Emit(p.jobID, EventClaudeCodeLine, map[string]any{
+		"tool_name":  name,
+		"tool_input": inputStr,
+	})
+}
+
+// claudeToolLabel builds a short human-readable label for a tool call.
+func claudeToolLabel(name string, input json.RawMessage) string {
+	var m map[string]any
+	if err := json.Unmarshal(input, &m); err != nil {
+		return "  > " + name
+	}
+	// Pick the most meaningful string field to show.
+	for _, key := range []string{"file_path", "command", "path", "pattern", "glob", "query", "description", "new_string"} {
+		v, ok := m[key].(string)
+		if !ok || v == "" {
+			continue
+		}
+		if len(v) > 60 {
+			v = v[:60] + "…"
+		}
+		return fmt.Sprintf("  > %s  %s=%s", name, key, v)
+	}
+	return "  > " + name
 }
 
 func CreatePullRequestTool(owner, token string) Tool {

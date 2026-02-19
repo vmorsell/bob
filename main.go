@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -32,6 +34,8 @@ func main() {
 	slackClient := slack.New(botToken)
 	notifier := NewSlackNotifier(slackClient)
 
+	hub := NewHub("/workspace/.bob")
+
 	tools := []Tool{
 		ListReposTool(githubOwner, githubToken),
 		CloneRepoTool(githubOwner, githubToken),
@@ -39,10 +43,19 @@ func main() {
 		CreatePullRequestTool(githubOwner, githubToken),
 	}
 
-	llm := NewAnthropicLLM(anthropicKey, tools)
+	onJobStart := func(ctx context.Context, jobID string) {
+		notifier.Notify(ctx, fmt.Sprintf("On it! Job ID: %s", jobID))
+	}
+
+	llm := NewAnthropicLLM(anthropicKey, tools, hub, onJobStart)
 
 	mux := http.NewServeMux()
-	mux.Handle("/webhooks/slack", NewSlackHandler(slackClient, signingSecret, llm))
+	mux.Handle("/webhooks/slack", NewSlackHandler(slackClient, signingSecret, llm, hub))
+	mux.HandleFunc("/events", hub.ServeSSE)
+	mux.HandleFunc("/api/jobs/", hub.ServeJobAPI)
+	mux.HandleFunc("/api/jobs", hub.ServeJobList)
+	mux.HandleFunc("/jobs/", serveUI)
+	mux.HandleFunc("/", serveUI)
 
 	log.Println("Bob listening on :8080")
 	if err := http.ListenAndServe(":8080", mux); err != nil {
