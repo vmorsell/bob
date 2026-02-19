@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -18,6 +19,10 @@ import (
 )
 
 func ImplementChangesTool(owner, claudeCodeToken string, notifier *SlackNotifier) Tool {
+	// Track which repo+job combos have already had a Claude Code session.
+	// Key: "jobID:repoName", Value: true
+	var sessions sync.Map
+
 	return Tool{
 		Name: "implement_changes",
 		Description: "Use Claude Code CLI to implement code changes in a cloned repository. The repo must already be cloned to /workspace via clone_repo. Returns the Claude Code output describing what was changed.",
@@ -50,38 +55,49 @@ func ImplementChangesTool(owner, claudeCodeToken string, notifier *SlackNotifier
 				return "", fmt.Errorf("repository %q not found at %s — clone it first using clone_repo", repoName, repoDir)
 			}
 
-			// Ensure root owns the repo (may be left as worker from a previous run).
-			chownRoot := exec.CommandContext(ctx, "chown", "-R", "0:0", repoDir)
-			if out, err := chownRoot.CombinedOutput(); err != nil {
-				return "", fmt.Errorf("chown to root failed: %s: %w", out, err)
-			}
+			jobID := JobIDFromCtx(ctx)
+			sessionKey := jobID + ":" + repoName
+			_, isRetry := sessions.Load(sessionKey)
 
-			// Reset to clean state.
-			resetCmd := exec.CommandContext(ctx, "sh", "-c", "git checkout . && git clean -fd && git checkout main && git pull")
-			resetCmd.Dir = repoDir
-			if out, err := resetCmd.CombinedOutput(); err != nil {
-				return "", fmt.Errorf("git reset failed: %s: %w", out, err)
+			if !isRetry {
+				// First run: reset to clean state.
+				chownRoot := exec.CommandContext(ctx, "chown", "-R", "0:0", repoDir)
+				if out, err := chownRoot.CombinedOutput(); err != nil {
+					return "", fmt.Errorf("chown to root failed: %s: %w", out, err)
+				}
+				resetCmd := exec.CommandContext(ctx, "sh", "-c", "git checkout . && git clean -fd && git checkout main && git pull")
+				resetCmd.Dir = repoDir
+				if out, err := resetCmd.CombinedOutput(); err != nil {
+					return "", fmt.Errorf("git reset failed: %s: %w", out, err)
+				}
 			}
 
 			// Ack to Slack.
-			notifier.Notify(ctx, fmt.Sprintf("Working on implementing changes in `%s/%s`...", owner, repoName))
+			if isRetry {
+				notifier.Notify(ctx, fmt.Sprintf("Retrying implementation in `%s/%s` (continuing previous session)...", owner, repoName))
+			} else {
+				notifier.Notify(ctx, fmt.Sprintf("Working on implementing changes in `%s/%s`...", owner, repoName))
+			}
 
 			// Run Claude Code CLI with a 15 minute timeout.
 			cliCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 			defer cancel()
 
-			// Chown repo to worker user so claude CLI can read/write.
+			// Ensure worker owns the repo for Claude CLI.
 			chown := exec.CommandContext(cliCtx, "chown", "-R", "1000:1000", repoDir)
 			if out, err := chown.CombinedOutput(); err != nil {
 				return "", fmt.Errorf("chown failed: %s: %w", out, err)
 			}
 
-			// stream-json emits one JSON object per line as each step happens,
-			// giving us real-time reasoning and tool-call visibility.
-			cmd := exec.CommandContext(cliCtx, "claude", "-p", params.Task,
+			// Build CLI args.
+			args := []string{"-p", params.Task,
 				"--output-format", "stream-json",
 				"--verbose",
-				"--dangerously-skip-permissions")
+				"--dangerously-skip-permissions"}
+			if isRetry {
+				args = append([]string{"--continue"}, args...)
+			}
+			cmd := exec.CommandContext(cliCtx, "claude", args...)
 			cmd.Dir = repoDir
 			cmd.Env = append(os.Environ(), "CLAUDE_CODE_OAUTH_TOKEN="+claudeCodeToken, "HOME=/home/worker")
 			cmd.SysProcAttr = &syscall.SysProcAttr{
@@ -92,6 +108,9 @@ func ImplementChangesTool(owner, claudeCodeToken string, notifier *SlackNotifier
 			cmd.Stdout = sp
 			cmd.Stderr = sp
 			runErr := cmd.Run()
+
+			// Mark this repo+job as having a session (even if it failed/timed out).
+			sessions.Store(sessionKey, true)
 
 			// Chown back to root so subsequent git commands work.
 			// Use parent ctx, not cliCtx — the CLI timeout may already be exceeded.
