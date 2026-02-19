@@ -66,8 +66,8 @@ func ImplementChangesTool(owner, claudeCodeToken string, notifier *SlackNotifier
 			// Ack to Slack.
 			notifier.Notify(ctx, fmt.Sprintf("Working on implementing changes in `%s/%s`...", owner, repoName))
 
-			// Run Claude Code CLI with a 5 minute timeout.
-			cliCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+			// Run Claude Code CLI with a 15 minute timeout.
+			cliCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 			defer cancel()
 
 			// Chown repo to worker user so claude CLI can read/write.
@@ -94,7 +94,8 @@ func ImplementChangesTool(owner, claudeCodeToken string, notifier *SlackNotifier
 			runErr := cmd.Run()
 
 			// Chown back to root so subsequent git commands work.
-			chownBack := exec.CommandContext(cliCtx, "chown", "-R", "0:0", repoDir)
+			// Use parent ctx, not cliCtx — the CLI timeout may already be exceeded.
+			chownBack := exec.CommandContext(ctx, "chown", "-R", "0:0", repoDir)
 			if out, chownErr := chownBack.CombinedOutput(); chownErr != nil {
 				return "", fmt.Errorf("chown back failed: %s: %w", out, chownErr)
 			}
