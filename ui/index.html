@@ -22,7 +22,7 @@
         --border2: #252535;
         --text: #e4e4f0;
         --sub: #9090a8;
-        --dim: #4a4a62;
+        --dim: #7a7aa2;
         --blue: #5b8ef0;
         --blue-bg: rgba(91, 142, 240, 0.08);
         --blue-border: rgba(91, 142, 240, 0.2);
@@ -44,7 +44,7 @@
         color: var(--text);
         font-family:
           -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-        font-size: 14px;
+        font-size: 15px;
         line-height: 1.6;
         -webkit-font-smoothing: antialiased;
       }
@@ -52,9 +52,6 @@
       a {
         color: var(--blue);
         text-decoration: none;
-      }
-      a:hover {
-        text-decoration: underline;
       }
 
       /* Nav */
@@ -78,7 +75,8 @@
         font-size: 1.67em;
         font-weight: 600;
         letter-spacing: 0.01em;
-        color: var(--text);
+        color: inherit;
+        text-decoration: none;
         line-height: 1;
       }
       .nav-brand:hover {
@@ -122,7 +120,7 @@
       .job-list {
         display: flex;
         flex-direction: column;
-        gap: 3px;
+        gap: 5px;
       }
 
       .job-row {
@@ -134,6 +132,8 @@
         border: 1px solid var(--border);
         border-radius: 8px;
         cursor: pointer;
+        color: inherit;
+        text-decoration: none;
         transition:
           background 0.1s,
           border-color 0.15s;
@@ -180,12 +180,12 @@
         white-space: nowrap;
       }
       .job-row-time {
-        font-size: 12px;
+        font-size: 13px;
         color: var(--sub);
         white-space: nowrap;
       }
       .job-row-id {
-        font-size: 11px;
+        font-size: 12px;
         color: var(--dim);
         font-family: "SF Mono", "Fira Code", monospace;
         white-space: nowrap;
@@ -277,7 +277,7 @@
       .ev-list {
         display: flex;
         flex-direction: column;
-        gap: 3px;
+        gap: 5px;
       }
 
       .ev {
@@ -312,13 +312,13 @@
         align-items: center;
         padding: 2px 7px;
         border-radius: 4px;
-        font-size: 10px;
+        font-size: 12px;
         font-weight: 600;
         letter-spacing: 0.05em;
         text-transform: uppercase;
         white-space: nowrap;
         flex-shrink: 0;
-        min-width: 90px;
+        width: 86px;
         justify-content: center;
       }
       .tag-job {
@@ -366,14 +366,14 @@
       }
 
       .dur {
-        font-size: 11px;
+        font-size: 12px;
         color: var(--dim);
         font-family: "SF Mono", "Fira Code", monospace;
         white-space: nowrap;
       }
 
       .ev-time {
-        font-size: 11px;
+        font-size: 12px;
         color: var(--dim);
         font-variant-numeric: tabular-nums;
         white-space: nowrap;
@@ -381,7 +381,7 @@
 
       .ev-caret {
         color: var(--dim);
-        font-size: 11px;
+        font-size: 13px;
         flex-shrink: 0;
         transition: transform 0.15s;
       }
@@ -398,7 +398,8 @@
         line-height: 1.65;
         color: var(--sub);
         white-space: pre-wrap;
-        word-break: break-all;
+        overflow-wrap: break-word;
+        word-break: break-word;
         background: var(--bg);
       }
       .ev.closed .ev-body {
@@ -417,11 +418,11 @@
         padding: 7px 14px;
         background: var(--s1);
         border-bottom: 1px solid var(--border);
-        font-size: 10px;
+        font-size: 11px;
         font-weight: 600;
         letter-spacing: 0.06em;
         text-transform: uppercase;
-        color: var(--dim);
+        color: var(--sub);
       }
       .cc-content {
         padding: 10px 0;
@@ -445,7 +446,7 @@
         gap: 7px;
         padding: 3px 14px;
         font-family: "SF Mono", "Fira Code", monospace;
-        font-size: 11px;
+        font-size: 12px;
       }
       .cc-arrow {
         color: var(--dim);
@@ -454,12 +455,14 @@
         color: var(--sub);
         font-weight: 600;
         min-width: 46px;
+        font-size: 12px;
       }
       .cc-arg {
         color: var(--dim);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        font-size: 12px;
       }
 
       /* Diff block (Edit / Write) */
@@ -468,7 +471,7 @@
         border-radius: 5px;
         overflow: hidden;
         font-family: "SF Mono", "Fira Code", monospace;
-        font-size: 11px;
+        font-size: 12px;
       }
       .cc-diff-hdr {
         display: flex;
@@ -478,10 +481,11 @@
         background: var(--s2);
         border: 1px solid var(--border);
         border-radius: 5px 5px 0 0;
+        font-size: 12px;
       }
       .cc-diff-path {
         color: var(--text);
-        font-size: 11px;
+        font-size: 12px;
       }
       .diff-lines {
         border: 1px solid var(--border);
@@ -494,6 +498,7 @@
         white-space: pre;
         overflow-x: auto;
         line-height: 1.6;
+        font-size: 12px;
       }
       .dl-del {
         background: rgba(240, 96, 96, 0.07);
@@ -590,7 +595,7 @@
         background: transparent;
       }
       ::-webkit-scrollbar-thumb {
-        background: var(--border2);
+        background: var(--dim);
         border-radius: 3px;
       }
       ::-webkit-scrollbar-thumb:hover {
@@ -600,9 +605,9 @@
   </head>
   <body>
     <nav>
-      <div class="nav-brand" onclick="location.href = '/'">
+      <a href="/" class="nav-brand">
         <span class="logo-emoji">👷</span>Bob
-      </div>
+      </a>
     </nav>
     <div class="page" id="app">
       <div class="placeholder">Loading&hellip;</div>
@@ -648,9 +653,9 @@
               var pip = "pip-" + (j.status || "running");
               var ago = relTime(j.started_at);
               return (
-                '<div class="job-row" onclick="location.href=\'/jobs/' +
+                '<a class="job-row" href="/jobs/' +
                 enc(j.id) +
-                "'\">" +
+                '">' +
                 '<span class="status-pip ' +
                 pip +
                 '"></span>' +
@@ -664,7 +669,7 @@
                 j.id.slice(0, 8) +
                 "</span>" +
                 '<span class="job-row-arrow">&#8250;</span>' +
-                "</div>"
+                "</a>"
               );
             })
             .join("");
@@ -697,7 +702,8 @@
           app(
             '<div id="jhdr" class="job-hdr"><div class="job-hdr-title" style="color:var(--dim)">Loading&hellip;</div></div>' +
               '<div id="lbar" class="live-bar"><span class="live-pip"></span><span>Live</span></div>' +
-              '<div id="evlist" class="ev-list"></div>',
+              '<div id="evlist" class="ev-list"></div>' +
+              '<div id="prfooter"></div>',
           );
 
           window.addEventListener("scroll", function () {
@@ -749,6 +755,15 @@
             h(taskText || "Loading\u2026") +
             "</div>" +
             (chips ? '<div class="job-hdr-chips">' + chips + "</div>" : "");
+
+          var footer = document.getElementById("prfooter");
+          if (footer) {
+            footer.innerHTML = prLink
+              ? '<a href="' +
+                h(prLink) +
+                '" target="_blank" style="display:inline-flex;align-items:center;gap:5px;margin-top:24px;padding:5px 13px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:6px;color:var(--green);font-size:13px;font-weight:500">&#8599; View Pull Request on GitHub</a>'
+              : "";
+          }
         }
 
         function addEvt(ev) {
