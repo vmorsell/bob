@@ -9,8 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
-	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
 )
@@ -25,7 +23,7 @@ type repo struct {
 func ListReposTool(owner, token string) Tool {
 	return Tool{
 		Name:        "list_repos",
-		Description: "Search repositories owned by the configured GitHub user or organization. Returns matching repos with name, description, clone URL, and visibility. When a query is provided, returns exact matches plus fuzzy matches for misspellings.",
+		Description: "Search repositories owned by the configured GitHub user or organization. Returns matching repos with name, description, clone URL, and visibility.",
 		Schema: anthropic.ToolInputSchemaParam{
 			Properties: map[string]any{
 				"query": map[string]any{
@@ -42,144 +40,52 @@ func ListReposTool(owner, token string) Tool {
 				return "", fmt.Errorf("parse input: %w", err)
 			}
 
-			// Always fetch all repos so we can do fuzzy matching.
-			repos, fetchErr := fetchRepos(ctx, token,
-				fmt.Sprintf("https://api.github.com/orgs/%s/repos?per_page=100", owner),
-				false)
-			if fetchErr != nil {
+			var repos []repo
+			var fetchErr error
+
+			if params.Query != "" {
+				// Search API: user: qualifier works for both orgs and personal accounts.
 				repos, fetchErr = fetchRepos(ctx, token,
-					fmt.Sprintf("https://api.github.com/users/%s/repos?per_page=100", owner),
+					fmt.Sprintf("https://api.github.com/search/repositories?q=%s+user:%s&per_page=10", params.Query, owner),
+					true)
+			} else {
+				// Try org endpoint first, fall back to user endpoint.
+				repos, fetchErr = fetchRepos(ctx, token,
+					fmt.Sprintf("https://api.github.com/orgs/%s/repos?per_page=30", owner),
 					false)
+				if fetchErr != nil {
+					repos, fetchErr = fetchRepos(ctx, token,
+						fmt.Sprintf("https://api.github.com/users/%s/repos?per_page=30", owner),
+						false)
+				}
 			}
 			if fetchErr != nil {
 				return "", fetchErr
 			}
 
+			// Return a slim JSON array.
 			type slimRepo struct {
 				Name        string `json:"name"`
 				Description string `json:"description"`
 				CloneURL    string `json:"clone_url"`
 				Private     bool   `json:"private"`
 			}
-
-			toSlim := func(r repo) slimRepo {
-				return slimRepo{Name: r.Name, Description: r.Description, CloneURL: r.CloneURL, Private: r.Private}
-			}
-
-			if params.Query == "" {
-				slim := make([]slimRepo, len(repos))
-				for i, r := range repos {
-					slim[i] = toSlim(r)
-				}
-				out, err := json.Marshal(slim)
-				if err != nil {
-					return "", fmt.Errorf("marshal result: %w", err)
-				}
-				return string(out), nil
-			}
-
-			// Fuzzy match: exact first, then by Levenshtein distance.
-			query := strings.ToLower(params.Query)
-			type scored struct {
-				r    repo
-				dist int
-			}
-			var matches []scored
-			for _, r := range repos {
-				name := strings.ToLower(r.Name)
-				if name == query {
-					// Exact match — return immediately.
-					out, err := json.Marshal([]slimRepo{toSlim(r)})
-					if err != nil {
-						return "", fmt.Errorf("marshal result: %w", err)
-					}
-					return string(out), nil
-				}
-				dist := levenshtein(query, name)
-				// Include repos within edit distance 3 or where query is a substring.
-				if dist <= 3 || strings.Contains(name, query) || strings.Contains(query, name) {
-					matches = append(matches, scored{r, dist})
+			slim := make([]slimRepo, len(repos))
+			for i, r := range repos {
+				slim[i] = slimRepo{
+					Name:        r.Name,
+					Description: r.Description,
+					CloneURL:    r.CloneURL,
+					Private:     r.Private,
 				}
 			}
-
-			if len(matches) == 0 {
-				// No close matches — return all repos so the LLM can reason about the best fit.
-				type result struct {
-					Message string     `json:"message"`
-					AllRepos []slimRepo `json:"all_repos"`
-				}
-				slim := make([]slimRepo, len(repos))
-				for i, r := range repos {
-					slim[i] = toSlim(r)
-				}
-				out, err := json.Marshal(result{
-					Message:  fmt.Sprintf("No repository closely matching %q was found. Here are all available repositories so you can identify the best match:", params.Query),
-					AllRepos: slim,
-				})
-				if err != nil {
-					return "", fmt.Errorf("marshal result: %w", err)
-				}
-				return string(out), nil
-			}
-
-			// Sort by distance ascending.
-			sort.Slice(matches, func(i, j int) bool { return matches[i].dist < matches[j].dist })
-
-			type fuzzyResult struct {
-				Message string     `json:"message"`
-				Matches []slimRepo `json:"matches"`
-			}
-			slim := make([]slimRepo, len(matches))
-			for i, m := range matches {
-				slim[i] = toSlim(m.r)
-			}
-			out, err := json.Marshal(fuzzyResult{
-				Message: fmt.Sprintf("No exact match for %q. Closest repositories by name similarity:", params.Query),
-				Matches: slim,
-			})
+			out, err := json.Marshal(slim)
 			if err != nil {
 				return "", fmt.Errorf("marshal result: %w", err)
 			}
 			return string(out), nil
 		},
 	}
-}
-
-// levenshtein computes the edit distance between two strings.
-func levenshtein(a, b string) int {
-	ra, rb := []rune(a), []rune(b)
-	la, lb := len(ra), len(rb)
-	if la == 0 {
-		return lb
-	}
-	if lb == 0 {
-		return la
-	}
-	row := make([]int, lb+1)
-	for j := range row {
-		row[j] = j
-	}
-	for i := 1; i <= la; i++ {
-		prev := row[0]
-		row[0] = i
-		for j := 1; j <= lb; j++ {
-			tmp := row[j]
-			if ra[i-1] == rb[j-1] {
-				row[j] = prev
-			} else {
-				row[j] = 1 + min(prev, min(row[j], row[j-1]))
-			}
-			prev = tmp
-		}
-	}
-	return row[lb]
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func fetchRepos(ctx context.Context, token, url string, isSearch bool) ([]repo, error) {
