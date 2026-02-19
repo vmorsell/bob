@@ -82,6 +82,14 @@ func NewSlackHandler(client *slack.Client, signingSecret string, llm LLM, hub *H
 }
 
 func handleMention(client *slack.Client, llm LLM, botUserID string, hub *Hub, ev *slackevents.AppMentionEvent) {
+	// Acknowledge the mention immediately.
+	if err := client.AddReaction("construction_worker", slack.ItemRef{
+		Channel:   ev.Channel,
+		Timestamp: ev.TimeStamp,
+	}); err != nil {
+		log.Printf("failed to add reaction: %v", err)
+	}
+
 	var messages []Message
 
 	if ev.ThreadTimeStamp != "" {
@@ -116,6 +124,13 @@ func handleMention(client *slack.Client, llm LLM, botUserID string, hub *Hub, ev
 	if err != nil {
 		log.Printf("llm error: %v", err)
 		resp = "Sorry, I hit an error trying to respond. Please try again."
+	}
+
+	if err := client.RemoveReaction("construction_worker", slack.ItemRef{
+		Channel:   ev.Channel,
+		Timestamp: ev.TimeStamp,
+	}); err != nil {
+		log.Printf("failed to remove reaction: %v", err)
 	}
 
 	_, _, err = client.PostMessage(ev.Channel,
