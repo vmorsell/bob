@@ -40,7 +40,7 @@ func main() {
 	tools := []Tool{
 		ListReposTool(githubOwner, githubToken),
 		CloneRepoTool(githubOwner, githubToken),
-		ImplementChangesTool(claudeCodeToken, notifier),
+		ImplementChangesTool(githubOwner, claudeCodeToken, notifier),
 		CreatePullRequestTool(githubOwner, githubToken),
 	}
 

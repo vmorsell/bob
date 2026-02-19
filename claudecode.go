@@ -17,7 +17,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 )
 
-func ImplementChangesTool(claudeCodeToken string, notifier *SlackNotifier) Tool {
+func ImplementChangesTool(owner, claudeCodeToken string, notifier *SlackNotifier) Tool {
 	return Tool{
 		Name:        "implement_changes",
 		Description: "Use Claude Code CLI to implement code changes in a cloned repository. The repo must already be cloned to /workspace via clone_repo. Returns the Claude Code output describing what was changed.",
@@ -64,7 +64,7 @@ func ImplementChangesTool(claudeCodeToken string, notifier *SlackNotifier) Tool 
 			}
 
 			// Ack to Slack.
-			notifier.Notify(ctx, fmt.Sprintf("Working on implementing changes in `%s`...", repoName))
+			notifier.Notify(ctx, fmt.Sprintf("Working on implementing changes in `%s/%s`...", owner, repoName))
 
 			// Run Claude Code CLI with a 5 minute timeout.
 			cliCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
