@@ -26,7 +26,7 @@ Available tools and typical workflow:
 2. start_job — Start a monitoring job. Call this exactly once, after confirming the repo exists and the task is clear, before any other execution tools.
 3. clone_repo — Clone a repository to your workspace.
 4. implement_changes — Use Claude Code CLI to implement code changes in a cloned repo.
-5. run_tests — Run a build or test command in a cloned repo to verify changes.
+5. run_tests — Run a build or test command (e.g. go test, npm test) to verify changes. Do not use this for exploration (cat, grep, ls) — implement_changes handles exploration internally via Claude Code.
 6. create_pull_request — Commit, push, and open a PR.
 
 Work in two phases:
@@ -39,6 +39,7 @@ is unclear.
 Phase 2 — Execute (once repo and task are confirmed):
 start_job → clone_repo → implement_changes → create_pull_request
 Call start_job exactly once at the start of Phase 2.
+Never use run_tests for file reading or exploration. Only use it to actually run tests or build commands.
 Always share the PR link in your response.`
 
 const maxToolIterations = 15

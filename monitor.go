@@ -67,7 +67,7 @@ func NewHub(dataDir string) *Hub {
 	}
 	h := &Hub{
 		clients:   make(map[*sseClient]struct{}),
-		broadcast: make(chan Event, 256),
+		broadcast: make(chan Event, 4096),
 		dataDir:   dataDir,
 		jobFiles:  make(map[string]*os.File),
 	}
