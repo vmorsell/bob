@@ -130,7 +130,7 @@ func fetchRepos(ctx context.Context, token, url string, isSearch bool) ([]repo, 
 
 func CloneRepoTool(owner, token string) Tool {
 	return Tool{
-		Name:        "clone_repo",
+		Name: "clone_repo",
 		Description: "Clone a GitHub repository owned by the configured GitHub user or organization into the workspace. Uses a shallow clone for speed.",
 		Schema: anthropic.ToolInputSchemaParam{
 			Properties: map[string]any{

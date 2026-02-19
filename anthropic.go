@@ -21,12 +21,23 @@ You have access to the team's GitHub organization. You can search for repositori
 implement code changes, and create pull requests.
 
 Available tools and typical workflow:
-1. list_repos — Search for repositories in the org.
-2. clone_repo — Clone a repository to your workspace.
-3. implement_changes — Use Claude Code CLI to implement code changes in a cloned repo. The repo must be cloned first.
-4. create_pull_request — Commit, push, and open a PR from the changes made by implement_changes.
+1. list_repos — Search for repositories in the org. Lightweight; does not start a job.
+2. start_job — Start a monitoring job. Call this exactly once, after confirming the repo exists and the task is clear, before any other execution tools.
+3. clone_repo — Clone a repository to your workspace.
+4. implement_changes — Use Claude Code CLI to implement code changes in a cloned repo.
+5. run_tests — Run a build or test command in a cloned repo to verify changes.
+6. create_pull_request — Commit, push, and open a PR.
 
-When asked to implement something, follow this flow: clone_repo → implement_changes → create_pull_request.
+Work in two phases:
+
+Phase 1 — Clarify (text replies + list_repos only):
+Confirm the repo name and a specific task description. Use list_repos to verify the
+repo exists. If it does not exist, tell the user and stop. Ask questions if anything
+is unclear.
+
+Phase 2 — Execute (once repo and task are confirmed):
+start_job → clone_repo → implement_changes → create_pull_request
+Call start_job exactly once at the start of Phase 2.
 Always share the PR link in your response.`
 
 const maxToolIterations = 15
@@ -42,16 +53,33 @@ type AnthropicLLM struct {
 func NewAnthropicLLM(apiKey string, tools []Tool, hub *Hub, onJobStart func(context.Context, string)) *AnthropicLLM {
 	client := anthropic.NewClient(option.WithAPIKey(apiKey))
 
-	sdkTools := make([]anthropic.ToolUnionParam, len(tools))
+	sdkTools := make([]anthropic.ToolUnionParam, 0, len(tools)+1)
 	toolFn := make(map[string]func(ctx context.Context, input json.RawMessage) (string, error), len(tools))
 
-	for i, t := range tools {
+	// start_job is handled inline in Respond(); add its definition here so the
+	// model knows it exists, but do not register a toolFn for it.
+	startJobTool := anthropic.ToolParam{
+		Name:        "start_job",
+		Description: anthropic.String("Start the monitoring job. Call this once after confirming the repo exists and the task is clear, before any other execution tools. Write a concise one-sentence task description."),
+		InputSchema: anthropic.ToolInputSchemaParam{
+			Properties: map[string]any{
+				"task": map[string]any{
+					"type":        "string",
+					"description": "Concise one-sentence description of the work to be done.",
+				},
+			},
+			Required: []string{"task"},
+		},
+	}
+	sdkTools = append(sdkTools, anthropic.ToolUnionParam{OfTool: &startJobTool})
+
+	for _, t := range tools {
 		tp := anthropic.ToolParam{
 			Name:        t.Name,
 			Description: anthropic.String(t.Description),
 			InputSchema: t.Schema,
 		}
-		sdkTools[i] = anthropic.ToolUnionParam{OfTool: &tp}
+		sdkTools = append(sdkTools, anthropic.ToolUnionParam{OfTool: &tp})
 		toolFn[t.Name] = t.Execute
 	}
 
@@ -65,18 +93,6 @@ func NewAnthropicLLM(apiKey string, tools []Tool, hub *Hub, onJobStart func(cont
 }
 
 func (a *AnthropicLLM) Respond(ctx context.Context, messages []Message) (string, error) {
-	// Extract task text from the last user message for the monitoring job.
-	taskText := ""
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == RoleUser {
-			taskText = messages[i].Content
-			if len(taskText) > 200 {
-				taskText = taskText[:200]
-			}
-			break
-		}
-	}
-
 	params := make([]anthropic.MessageParam, len(messages))
 	for i, msg := range messages {
 		block := anthropic.NewTextBlock(msg.Content)
@@ -130,8 +146,20 @@ func (a *AnthropicLLM) Respond(ctx context.Context, messages []Message) (string,
 			return "", fmt.Errorf("anthropic: empty response")
 		}
 
-		// First tool_use: create the monitoring job.
-		if jobID == "" {
+		// Append the assistant's response (including tool_use blocks) to the conversation.
+		params = append(params, resp.ToParam())
+
+		// Pre-pass: handle start_job before any other tool so that subsequent
+		// tools in the same response batch can emit events under the new jobID.
+		for _, block := range resp.Content {
+			variant, ok := block.AsAny().(anthropic.ToolUseBlock)
+			if !ok || variant.Name != "start_job" || jobID != "" {
+				continue
+			}
+			var input struct {
+				Task string `json:"task"`
+			}
+			json.Unmarshal(variant.Input, &input)
 			jobID = generateJobID()
 			channel, _ := ctx.Value(ctxKeyChannel).(string)
 			threadTS, _ := ctx.Value(ctxKeyThreadTS).(string)
@@ -141,7 +169,7 @@ func (a *AnthropicLLM) Respond(ctx context.Context, messages []Message) (string,
 					channel, strings.ReplaceAll(threadTS, ".", ""))
 			}
 			a.hub.Emit(jobID, EventJobStarted, map[string]any{
-				"task":             taskText,
+				"task":             input.Task,
 				"slack_thread_url": slackThreadURL,
 				"channel":          channel,
 				"thread_ts":        threadTS,
@@ -149,16 +177,14 @@ func (a *AnthropicLLM) Respond(ctx context.Context, messages []Message) (string,
 			if a.onJobStart != nil {
 				a.onJobStart(ctx, jobID)
 			}
-			// Re-emit LLMCall and LLMResponse for this iteration now that we have a jobID.
+			// Backfill LLMCall and LLMResponse for this iteration.
 			a.hub.Emit(jobID, EventLLMCall, map[string]any{"iteration": iter})
 			a.hub.Emit(jobID, EventLLMResponse, map[string]any{
 				"stop_reason": string(resp.StopReason),
 				"summary":     summary,
 			})
+			break
 		}
-
-		// Append the assistant's response (including tool_use blocks) to the conversation.
-		params = append(params, resp.ToParam())
 
 		// Execute each tool call with monitoring context.
 		toolCtx := WithJobID(ctx, jobID)
@@ -168,6 +194,13 @@ func (a *AnthropicLLM) Respond(ctx context.Context, messages []Message) (string,
 		for _, block := range resp.Content {
 			variant, ok := block.AsAny().(anthropic.ToolUseBlock)
 			if !ok {
+				continue
+			}
+
+			// start_job was already handled in the pre-pass above.
+			if variant.Name == "start_job" {
+				toolResults = append(toolResults,
+					anthropic.NewToolResultBlock(variant.ID, "Job started.", false))
 				continue
 			}
 

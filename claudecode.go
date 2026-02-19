@@ -19,7 +19,7 @@ import (
 
 func ImplementChangesTool(owner, claudeCodeToken string, notifier *SlackNotifier) Tool {
 	return Tool{
-		Name:        "implement_changes",
+		Name: "implement_changes",
 		Description: "Use Claude Code CLI to implement code changes in a cloned repository. The repo must already be cloned to /workspace via clone_repo. Returns the Claude Code output describing what was changed.",
 		Schema: anthropic.ToolInputSchemaParam{
 			Properties: map[string]any{
@@ -274,7 +274,7 @@ func claudeToolLabel(name string, input json.RawMessage) string {
 
 func CreatePullRequestTool(owner, token string) Tool {
 	return Tool{
-		Name:        "create_pull_request",
+		Name: "create_pull_request",
 		Description: "Create a GitHub pull request from uncommitted changes in a cloned repository. Commits all changes, pushes a new branch, and opens a PR. Returns the PR URL.",
 		Schema: anthropic.ToolInputSchemaParam{
 			Properties: map[string]any{

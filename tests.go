@@ -14,7 +14,7 @@ import (
 
 func RunTestsTool(owner string, notifier *SlackNotifier) Tool {
 	return Tool{
-		Name:        "run_tests",
+		Name: "run_tests",
 		Description: "Run a test or build command in a cloned repository to verify that changes work. The repo must already be cloned to /workspace via clone_repo. Returns the command output and exit code.",
 		Schema: anthropic.ToolInputSchemaParam{
 			Properties: map[string]any{
