@@ -14,7 +14,7 @@ import (
 
 const bobSystemPrompt = `You are Bob, a helpful assistant for a software team. You communicate via Slack.
 Keep responses concise and practical — this is a chat interface, not a document.
-Use Slack-compatible markdown when formatting is helpful.
+Use Slack formatting when helpful: *bold*, _italic_, inline code with backticks. Do not use markdown like **bold** — it will not render.
 Do not use emojis.
 
 You have access to the team's GitHub organization. You can search for repositories, clone them,
@@ -113,15 +113,8 @@ func (a *AnthropicLLM) Respond(ctx context.Context, messages []Message) (string,
 
 		summary := summarizeLLMResponse(resp)
 
-		// Emit LLMResponse (only after job is created).
-		if jobID != "" {
-			a.hub.Emit(jobID, EventLLMResponse, map[string]any{
-				"stop_reason": string(resp.StopReason),
-				"summary":     summary,
-			})
-		}
-
-		// If not tool_use, extract text and return.
+		// If not tool_use, this is the final turn — job_completed carries the
+		// summary, so skip emitting a redundant llm_response for this iteration.
 		if resp.StopReason != anthropic.StopReasonToolUse {
 			if jobID != "" {
 				a.hub.Emit(jobID, EventJobCompleted, map[string]any{

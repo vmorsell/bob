@@ -770,8 +770,24 @@
           }
 
           // Claude Code output line — append to CC content block.
+          // The section is created lazily here so it appears after the
+          // tool_started row and any Slack notification, not before them.
           if (ev.type === "claude_code_line") {
             var content = document.getElementById("cc-content-" + ccIdx);
+            if (!content && ccIdx >= 0) {
+              var ccList = document.getElementById("evlist");
+              if (ccList) {
+                var sec = document.createElement("div");
+                sec.className = "cc-section";
+                sec.innerHTML =
+                  '<div class="cc-label">Claude Code</div>' +
+                  '<div class="cc-content" id="cc-content-' +
+                  ccIdx +
+                  '"></div>';
+                ccList.appendChild(sec);
+                content = document.getElementById("cc-content-" + ccIdx);
+              }
+            }
             if (content) {
               var item = makeCCItem(d);
               if (item) {
@@ -782,23 +798,13 @@
             return;
           }
 
-          // Create CC output block when implement_changes starts.
+          // Track when implement_changes starts; CC section is created lazily
+          // on the first claude_code_line so ordering in the UI is correct.
           if (
             ev.type === "tool_started" &&
             d.tool_name === "implement_changes"
           ) {
             ccIdx = toolIdx;
-            var list = document.getElementById("evlist");
-            if (list) {
-              var sec = document.createElement("div");
-              sec.className = "cc-section";
-              sec.innerHTML =
-                '<div class="cc-label">Claude Code</div>' +
-                '<div class="cc-content" id="cc-content-' +
-                ccIdx +
-                '"></div>';
-              list.appendChild(sec);
-            }
           }
           if (ev.type === "tool_completed") toolIdx++;
 

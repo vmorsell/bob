@@ -45,9 +45,9 @@ func main() {
 	}
 
 	onJobStart := func(ctx context.Context, jobID string) {
-		msg := fmt.Sprintf("On it! Job ID: %s", jobID)
+		msg := "On it!"
 		if bobURL != "" {
-			msg = fmt.Sprintf("On it! <%s/jobs/%s|Job %s>", bobURL, jobID, jobID[:8])
+			msg = fmt.Sprintf("On it! Follow my progress <%s/jobs/%s|here>.", bobURL, jobID)
 		}
 		notifier.Notify(ctx, msg)
 	}
