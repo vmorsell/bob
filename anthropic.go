@@ -40,7 +40,7 @@ Phase 2 — Execute (once repo and task are confirmed):
 start_job → clone_repo → implement_changes → create_pull_request
 Call start_job exactly once at the start of Phase 2.
 Never use run_tests for file reading or exploration. Only use it to actually run tests or build commands.
-Always share the PR link in your response.`
+Do not share the PR link — the system handles that automatically.`
 
 const maxToolIterations = 15
 
@@ -50,10 +50,9 @@ type AnthropicLLM struct {
 	toolFn     map[string]func(ctx context.Context, input json.RawMessage) (string, error)
 	hub        *Hub
 	onJobStart func(ctx context.Context, jobID string)
-	notifier   *SlackNotifier
 }
 
-func NewAnthropicLLM(apiKey string, tools []Tool, hub *Hub, onJobStart func(context.Context, string), notifier *SlackNotifier) *AnthropicLLM {
+func NewAnthropicLLM(apiKey string, tools []Tool, hub *Hub, onJobStart func(context.Context, string)) *AnthropicLLM {
 	client := anthropic.NewClient(option.WithAPIKey(apiKey))
 
 	sdkTools := make([]anthropic.ToolUnionParam, 0, len(tools)+1)
@@ -92,11 +91,10 @@ func NewAnthropicLLM(apiKey string, tools []Tool, hub *Hub, onJobStart func(cont
 		toolFn:     toolFn,
 		hub:        hub,
 		onJobStart: onJobStart,
-		notifier:   notifier,
 	}
 }
 
-func (a *AnthropicLLM) Respond(ctx context.Context, messages []Message) (string, error) {
+func (a *AnthropicLLM) Respond(ctx context.Context, messages []Message) (LLMResponse, error) {
 	params := make([]anthropic.MessageParam, len(messages))
 	for i, msg := range messages {
 		block := anthropic.NewTextBlock(msg.Content)
@@ -109,8 +107,8 @@ func (a *AnthropicLLM) Respond(ctx context.Context, messages []Message) (string,
 	}
 
 	jobID := ""
+	prURL := ""
 	startTime := time.Now()
-	lastNotification := ""
 
 	for iter := range maxToolIterations {
 		// Emit LLMCall before each API call (only after job is created).
@@ -129,7 +127,7 @@ func (a *AnthropicLLM) Respond(ctx context.Context, messages []Message) (string,
 		})
 		if err != nil {
 			a.hub.Emit(jobID, EventJobError, map[string]any{"error": err.Error()})
-			return "", fmt.Errorf("anthropic: %w", err)
+			return LLMResponse{}, fmt.Errorf("anthropic: %w", err)
 		}
 
 		summary := summarizeLLMResponse(resp)
@@ -145,10 +143,10 @@ func (a *AnthropicLLM) Respond(ctx context.Context, messages []Message) (string,
 							"total_duration_ms": time.Since(startTime).Milliseconds(),
 						})
 					}
-					return block.Text, nil
+					return LLMResponse{Text: block.Text, IsJob: jobID != "", PRURL: prURL}, nil
 				}
 			}
-			return "", fmt.Errorf("anthropic: empty response")
+			return LLMResponse{}, fmt.Errorf("anthropic: empty response")
 		}
 
 		// Append the assistant's response (including tool_use blocks) to the conversation.
@@ -189,43 +187,6 @@ func (a *AnthropicLLM) Respond(ctx context.Context, messages []Message) (string,
 				"summary":     summary,
 			})
 			break
-		}
-
-		// Stage-transition notification: post the model's reasoning to Slack when
-		// entering a major execution stage.
-		majorFallbacks := map[string]string{
-			"implement_changes":   "Implementing changes...",
-			"run_tests":           "Running tests...",
-			"create_pull_request": "Creating pull request...",
-		}
-		if jobID != "" && a.notifier != nil {
-			var reasoning string
-			for _, block := range resp.Content {
-				if tb, ok := block.AsAny().(anthropic.TextBlock); ok && tb.Text != "" {
-					reasoning = strings.TrimSpace(tb.Text)
-					break
-				}
-			}
-			for _, block := range resp.Content {
-				variant, ok := block.AsAny().(anthropic.ToolUseBlock)
-				if !ok {
-					continue
-				}
-				fallback, isMajor := majorFallbacks[variant.Name]
-				if !isMajor {
-					continue
-				}
-				msg := reasoning
-				if msg == "" {
-					msg = fallback
-				}
-				if msg == lastNotification {
-					break
-				}
-				a.notifier.Notify(ctx, msg)
-				lastNotification = msg
-				break // one notification per LLM iteration
-			}
 		}
 
 		// Execute each tool call with monitoring context.
@@ -289,6 +250,14 @@ func (a *AnthropicLLM) Respond(ctx context.Context, messages []Message) (string,
 				"result_preview": truncate(result, 300),
 				"duration_ms":    durationMs,
 			})
+
+			// Capture PR URL from create_pull_request result.
+			if variant.Name == "create_pull_request" {
+				if after, ok := strings.CutPrefix(result, "Pull request created: "); ok {
+					prURL = strings.TrimSpace(after)
+				}
+			}
+
 			toolResults = append(toolResults,
 				anthropic.NewToolResultBlock(variant.ID, result, false))
 		}
@@ -299,7 +268,7 @@ func (a *AnthropicLLM) Respond(ctx context.Context, messages []Message) (string,
 	a.hub.Emit(jobID, EventJobError, map[string]any{
 		"error": fmt.Sprintf("exceeded max tool iterations (%d)", maxToolIterations),
 	})
-	return "", fmt.Errorf("anthropic: exceeded max tool iterations (%d)", maxToolIterations)
+	return LLMResponse{}, fmt.Errorf("anthropic: exceeded max tool iterations (%d)", maxToolIterations)
 }
 
 // summarizeLLMResponse returns a short text summary of a model response.

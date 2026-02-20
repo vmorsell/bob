@@ -148,15 +148,23 @@ func handleMention(client *slack.Client, llm LLM, botUserID string, hub *Hub, ev
 	ctx = WithHub(ctx, hub)
 
 	resp, err := llm.Respond(ctx, messages)
-	if err != nil {
-		log.Printf("llm error: %v", err)
-		resp = "Sorry, I hit an error trying to respond. Please try again."
-	}
 
 	removeReaction(client, ev.Channel, ev.TimeStamp)
 
+	var text string
+	if err != nil {
+		log.Printf("llm error: %v", err)
+		text = fmt.Sprintf("<@%s> Sorry, I hit an error trying to respond. Please try again.", ev.User)
+	} else if resp.IsJob && resp.PRURL != "" {
+		text = fmt.Sprintf("<@%s> Done! %s", ev.User, resp.PRURL)
+	} else if resp.IsJob {
+		text = fmt.Sprintf("<@%s> Done!", ev.User)
+	} else {
+		text = fmt.Sprintf("<@%s> %s", ev.User, resp.Text)
+	}
+
 	_, _, err = client.PostMessage(ev.Channel,
-		slack.MsgOptionText(fmt.Sprintf("<@%s> %s", ev.User, resp), false),
+		slack.MsgOptionText(text, false),
 		slack.MsgOptionTS(threadTS),
 	)
 	if err != nil {

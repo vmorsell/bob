@@ -18,7 +18,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 )
 
-func ImplementChangesTool(owner, claudeCodeToken string) Tool {
+func ImplementChangesTool(owner, claudeCodeToken string, notifier *SlackNotifier) Tool {
 	// Track which repo+job combos have already had a Claude Code session.
 	// Key: "jobID:repoName", Value: true
 	var sessions sync.Map
@@ -82,11 +82,8 @@ func ImplementChangesTool(owner, claudeCodeToken string) Tool {
 				return "", fmt.Errorf("chown failed: %s: %w", out, err)
 			}
 
-			// Append summary instruction to the task.
-			task := params.Task + "\n\nWhen you have finished all changes, write a brief summary starting with \"BOB_SUMMARY:\" on its own line, followed by 2-4 sentences describing what was implemented and what files were changed."
-
 			// Build CLI args.
-			args := []string{"-p", task,
+			args := []string{"-p", params.Task,
 				"--output-format", "stream-json",
 				"--verbose",
 				"--dangerously-skip-permissions"}
@@ -100,7 +97,7 @@ func ImplementChangesTool(owner, claudeCodeToken string) Tool {
 				Credential: &syscall.Credential{Uid: 1000, Gid: 1000},
 			}
 
-			sp := newClaudeStreamParser(HubFromCtx(ctx), JobIDFromCtx(ctx))
+			sp := newClaudeStreamParser(HubFromCtx(ctx), JobIDFromCtx(ctx), notifier, ctx)
 			cmd.Stdout = sp
 			cmd.Stderr = sp
 			runErr := cmd.Run()
@@ -130,41 +127,30 @@ func ImplementChangesTool(owner, claudeCodeToken string) Tool {
 				return "No changes were made.", nil
 			}
 
-			// Return the summary, or fall back to truncated raw output.
-			result := extractSummary(sp.output())
-			if result == "" {
-				result = sp.output()
-				if len(result) > 2000 {
-					result = result[:2000] + "\n... (truncated)"
-				}
+			result := sp.output()
+			if len(result) > 2000 {
+				result = result[:2000] + "\n... (truncated)"
 			}
 			return result, nil
 		},
 	}
 }
 
-// extractSummary extracts the text after "BOB_SUMMARY:" from Claude Code output.
-func extractSummary(s string) string {
-	const marker = "BOB_SUMMARY:"
-	if i := strings.Index(s, marker); i >= 0 {
-		return strings.TrimSpace(s[i+len(marker):])
-	}
-	return ""
-}
-
 // claudeStreamParser parses the --output-format stream-json output from the
 // Claude Code CLI, emitting real-time hub events for each reasoning step and
 // tool call, while also collecting the final result text.
 type claudeStreamParser struct {
-	hub     *Hub
-	jobID   string
-	lineBuf []byte
-	raw     bytes.Buffer // full raw bytes, for error messages
-	result  string       // text from the final "result" event
+	hub      *Hub
+	jobID    string
+	notifier *SlackNotifier
+	ctx      context.Context
+	lineBuf  []byte
+	raw      bytes.Buffer // full raw bytes, for error messages
+	result   string       // text from the final "result" event
 }
 
-func newClaudeStreamParser(hub *Hub, jobID string) *claudeStreamParser {
-	return &claudeStreamParser{hub: hub, jobID: jobID}
+func newClaudeStreamParser(hub *Hub, jobID string, notifier *SlackNotifier, ctx context.Context) *claudeStreamParser {
+	return &claudeStreamParser{hub: hub, jobID: jobID, notifier: notifier, ctx: ctx}
 }
 
 func (p *claudeStreamParser) Write(data []byte) (int, error) {
@@ -230,6 +216,9 @@ func (p *claudeStreamParser) processLine(line string) {
 			}
 			switch block.Type {
 			case "text":
+				if p.notifier != nil && strings.TrimSpace(block.Text) != "" {
+					p.notifier.Notify(p.ctx, block.Text)
+				}
 				for _, textLine := range strings.Split(block.Text, "\n") {
 					if strings.TrimSpace(textLine) != "" {
 						p.emit(textLine)
@@ -277,26 +266,6 @@ func (p *claudeStreamParser) emitTool(name string, input json.RawMessage) {
 		"tool_name":  name,
 		"tool_input": inputStr,
 	})
-}
-
-// claudeToolLabel builds a short human-readable label for a tool call.
-func claudeToolLabel(name string, input json.RawMessage) string {
-	var m map[string]any
-	if err := json.Unmarshal(input, &m); err != nil {
-		return "  > " + name
-	}
-	// Pick the most meaningful string field to show.
-	for _, key := range []string{"file_path", "command", "path", "pattern", "glob", "query", "description", "new_string"} {
-		v, ok := m[key].(string)
-		if !ok || v == "" {
-			continue
-		}
-		if len(v) > 60 {
-			v = v[:60] + "…"
-		}
-		return fmt.Sprintf("  > %s  %s=%s", name, key, v)
-	}
-	return "  > " + name
 }
 
 func CreatePullRequestTool(owner, token string) Tool {

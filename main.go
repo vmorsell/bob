@@ -41,7 +41,7 @@ func main() {
 	tools := []Tool{
 		ListReposTool(githubOwner, githubToken),
 		CloneRepoTool(githubOwner, githubToken),
-		ImplementChangesTool(githubOwner, claudeCodeToken),
+		ImplementChangesTool(githubOwner, claudeCodeToken, notifier),
 		RunTestsTool(githubOwner),
 		CreatePullRequestTool(githubOwner, githubToken),
 	}
@@ -54,7 +54,7 @@ func main() {
 		notifier.Notify(ctx, msg)
 	}
 
-	llm := NewAnthropicLLM(anthropicKey, tools, hub, onJobStart, notifier)
+	llm := NewAnthropicLLM(anthropicKey, tools, hub, onJobStart)
 
 	maxPerMinute := 15.0
 	if v := os.Getenv("MAX_INBOUND_MESSAGES_PER_MIN"); v != "" {
