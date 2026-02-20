@@ -137,14 +137,14 @@ func (a *AnthropicLLM) Respond(ctx context.Context, messages []Message) (string,
 		// If not tool_use, this is the final turn — job_completed carries the
 		// summary, so skip emitting a redundant llm_response for this iteration.
 		if resp.StopReason != anthropic.StopReasonToolUse {
-			if jobID != "" {
-				a.hub.Emit(jobID, EventJobCompleted, map[string]any{
-					"final_response":    summary,
-					"total_duration_ms": time.Since(startTime).Milliseconds(),
-				})
-			}
 			for _, block := range resp.Content {
 				if block.Type == "text" {
+					if jobID != "" {
+						a.hub.Emit(jobID, EventJobCompleted, map[string]any{
+							"final_response":    block.Text,
+							"total_duration_ms": time.Since(startTime).Milliseconds(),
+						})
+					}
 					return block.Text, nil
 				}
 			}
@@ -218,8 +218,6 @@ func (a *AnthropicLLM) Respond(ctx context.Context, messages []Message) (string,
 				msg := reasoning
 				if msg == "" {
 					msg = fallback
-				} else {
-					msg = truncate(msg, 400)
 				}
 				if msg == lastNotification {
 					break
