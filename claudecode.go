@@ -82,8 +82,11 @@ func ImplementChangesTool(owner, claudeCodeToken string) Tool {
 				return "", fmt.Errorf("chown failed: %s: %w", out, err)
 			}
 
+			// Append summary instruction to the task.
+			task := params.Task + "\n\nWhen you have finished all changes, write a brief summary starting with \"BOB_SUMMARY:\" on its own line, followed by 2-4 sentences describing what was implemented and what files were changed."
+
 			// Build CLI args.
-			args := []string{"-p", params.Task,
+			args := []string{"-p", task,
 				"--output-format", "stream-json",
 				"--verbose",
 				"--dangerously-skip-permissions"}
@@ -127,14 +130,26 @@ func ImplementChangesTool(owner, claudeCodeToken string) Tool {
 				return "No changes were made.", nil
 			}
 
-			// Return the clean result text (or fall back to raw output).
-			result := sp.output()
-			if len(result) > 50*1024 {
-				result = result[:50*1024] + "\n... (output truncated)"
+			// Return the summary, or fall back to truncated raw output.
+			result := extractSummary(sp.output())
+			if result == "" {
+				result = sp.output()
+				if len(result) > 2000 {
+					result = result[:2000] + "\n... (truncated)"
+				}
 			}
 			return result, nil
 		},
 	}
+}
+
+// extractSummary extracts the text after "BOB_SUMMARY:" from Claude Code output.
+func extractSummary(s string) string {
+	const marker = "BOB_SUMMARY:"
+	if i := strings.Index(s, marker); i >= 0 {
+		return strings.TrimSpace(s[i+len(marker):])
+	}
+	return ""
 }
 
 // claudeStreamParser parses the --output-format stream-json output from the

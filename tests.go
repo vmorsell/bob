@@ -57,8 +57,8 @@ func RunTestsTool(owner string) Tool {
 			runErr := cmd.Run()
 
 			output := sw.buf.String()
-			if len(output) > 50*1024 {
-				output = output[:50*1024] + "\n... (output truncated)"
+			if len(output) > 8*1024 {
+				output = "... (output truncated)\n" + output[len(output)-8*1024:]
 			}
 
 			if runErr != nil {
