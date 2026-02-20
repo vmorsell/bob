@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/slack-go/slack"
 )
@@ -55,8 +56,15 @@ func main() {
 
 	llm := NewAnthropicLLM(anthropicKey, tools, hub, onJobStart, notifier)
 
+	maxPerMinute := 15.0
+	if v := os.Getenv("MAX_INBOUND_MESSAGES_PER_MIN"); v != "" {
+		if parsed, err := strconv.ParseFloat(v, 64); err == nil {
+			maxPerMinute = parsed
+		}
+	}
+
 	mux := http.NewServeMux()
-	mux.Handle("/webhooks/slack", NewSlackHandler(slackClient, signingSecret, llm, hub))
+	mux.Handle("/webhooks/slack", NewSlackHandler(slackClient, signingSecret, llm, hub, maxPerMinute))
 	mux.HandleFunc("/events", hub.ServeSSE)
 	mux.HandleFunc("/api/jobs/", hub.ServeJobAPI)
 	mux.HandleFunc("/api/jobs", hub.ServeJobList)
