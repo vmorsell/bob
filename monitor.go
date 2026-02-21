@@ -229,6 +229,7 @@ type jobSummary struct {
 	Task      string    `json:"task"`
 	StartedAt time.Time `json:"started_at"`
 	Status    string    `json:"status"`
+	CostUSD   float64   `json:"cost_usd"`
 }
 
 // ServeJobList handles GET /api/jobs — returns a summary of all known jobs.
@@ -260,36 +261,39 @@ func (h *Hub) ServeJobList(w http.ResponseWriter, r *http.Request) {
 
 		scanner := bufio.NewScanner(f)
 		scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
-		var firstLine, lastLine string
+		var cost float64
+		first := true
 		for scanner.Scan() {
-			line := scanner.Text()
-			if firstLine == "" {
-				firstLine = line
-			}
-			lastLine = line
-		}
-		f.Close()
-
-		if firstLine != "" {
 			var e Event
-			if err := json.Unmarshal([]byte(firstLine), &e); err == nil {
+			if err := json.Unmarshal(scanner.Bytes(), &e); err != nil {
+				continue
+			}
+			if first {
 				if task, ok := e.Data["task"].(string); ok {
 					summary.Task = task
 				}
 				summary.StartedAt = e.Timestamp
+				first = false
 			}
-		}
-		if lastLine != "" {
-			var e Event
-			if err := json.Unmarshal([]byte(lastLine), &e); err == nil {
-				switch e.Type {
-				case EventJobCompleted:
-					summary.Status = "completed"
-				case EventJobError:
-					summary.Status = "error"
+			switch e.Type {
+			case EventLLMResponse:
+				if v, ok := e.Data["cost_usd"].(float64); ok {
+					cost += v
+				}
+			case EventJobCompleted:
+				summary.Status = "completed"
+				if v, ok := e.Data["total_cost_usd"].(float64); ok {
+					cost = v // authoritative total
+				}
+			case EventJobError:
+				summary.Status = "error"
+				if v, ok := e.Data["total_cost_usd"].(float64); ok {
+					cost = v
 				}
 			}
 		}
+		f.Close()
+		summary.CostUSD = cost
 		jobs = append(jobs, summary)
 	}
 
@@ -305,6 +309,91 @@ func (h *Hub) ServeJobList(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(jobs)
+}
+
+type statsResponse struct {
+	TotalJobs             int     `json:"total_jobs"`
+	CompletedJobs         int     `json:"completed_jobs"`
+	ErrorJobs             int     `json:"error_jobs"`
+	RunningJobs           int     `json:"running_jobs"`
+	TotalCostUSD          float64 `json:"total_cost_usd"`
+	TotalInputTokens      int64   `json:"total_input_tokens"`
+	TotalOutputTokens     int64   `json:"total_output_tokens"`
+	TotalCacheReadTokens  int64   `json:"total_cache_read_tokens"`
+	TotalCacheWriteTokens int64   `json:"total_cache_write_tokens"`
+}
+
+// ServeStats handles GET /api/stats — returns aggregate cost and token stats.
+func (h *Hub) ServeStats(w http.ResponseWriter, r *http.Request) {
+	entries, err := os.ReadDir(h.dataDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(statsResponse{})
+			return
+		}
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	var stats statsResponse
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), ".jsonl") {
+			continue
+		}
+		stats.TotalJobs++
+
+		path := filepath.Join(h.dataDir, entry.Name())
+		f, err := os.Open(path)
+		if err != nil {
+			continue
+		}
+
+		scanner := bufio.NewScanner(f)
+		scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+		status := "running"
+		for scanner.Scan() {
+			var e Event
+			if err := json.Unmarshal(scanner.Bytes(), &e); err != nil {
+				continue
+			}
+			switch e.Type {
+			case EventLLMResponse:
+				if v, ok := e.Data["input_tokens"].(float64); ok {
+					stats.TotalInputTokens += int64(v)
+				}
+				if v, ok := e.Data["output_tokens"].(float64); ok {
+					stats.TotalOutputTokens += int64(v)
+				}
+				if v, ok := e.Data["cache_read_tokens"].(float64); ok {
+					stats.TotalCacheReadTokens += int64(v)
+				}
+				if v, ok := e.Data["cache_write_tokens"].(float64); ok {
+					stats.TotalCacheWriteTokens += int64(v)
+				}
+				if v, ok := e.Data["cost_usd"].(float64); ok {
+					stats.TotalCostUSD += v
+				}
+			case EventJobCompleted:
+				status = "completed"
+			case EventJobError:
+				status = "error"
+			}
+		}
+		f.Close()
+
+		switch status {
+		case "completed":
+			stats.CompletedJobs++
+		case "error":
+			stats.ErrorJobs++
+		default:
+			stats.RunningJobs++
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
 }
 
 // serveUI returns the single-page monitoring app for all UI routes.

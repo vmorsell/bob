@@ -68,6 +68,7 @@ func main() {
 	mux.HandleFunc("/events", hub.ServeSSE)
 	mux.HandleFunc("/api/jobs/", hub.ServeJobAPI)
 	mux.HandleFunc("/api/jobs", hub.ServeJobList)
+	mux.HandleFunc("/api/stats", hub.ServeStats)
 	mux.HandleFunc("/jobs/", serveUI)
 	mux.HandleFunc("/", serveUI)
 

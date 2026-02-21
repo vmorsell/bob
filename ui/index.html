@@ -313,6 +313,51 @@
         background: rgba(52, 199, 89, 0.18);
         text-decoration: none;
       }
+      .chip-cost {
+        color: var(--orange);
+        background: var(--orange-subtle);
+      }
+
+      /* ── Stats bar ── */
+      .stats-bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 24px;
+        padding: 16px 20px;
+        background: var(--surface);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow-sm);
+        border: 1px solid var(--border);
+      }
+      .stat-item {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 100px;
+        flex: 1;
+      }
+      .stat-label {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--text-tertiary);
+      }
+      .stat-value {
+        font-size: 20px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .job-row-cost {
+        font-size: 13px;
+        color: var(--text-secondary);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
 
       /* ── Live bar ── */
       .live-bar {
@@ -700,19 +745,22 @@
 
         function initOverview() {
           document.title = "Bob";
-          loadJobs();
-          setInterval(loadJobs, 10000);
+          loadOverview();
+          setInterval(loadOverview, 10000);
         }
 
-        function loadJobs() {
-          fetch("/api/jobs")
-            .then(function (r) {
-              return r.json();
-            })
-            .then(renderOverview)
-            .catch(function () {
-              app('<div class="placeholder">Failed to load.</div>');
-            });
+        var cachedStats = null;
+
+        function loadOverview() {
+          Promise.all([
+            fetch("/api/jobs").then(function (r) { return r.json(); }),
+            fetch("/api/stats").then(function (r) { return r.json(); }).catch(function () { return null; }),
+          ]).then(function (results) {
+            cachedStats = results[1];
+            renderOverview(results[0]);
+          }).catch(function () {
+            app('<div class="placeholder">Failed to load.</div>');
+          });
         }
 
         function renderOverview(jobs) {
@@ -722,10 +770,25 @@
             );
             return;
           }
+
+          var statsBar = "";
+          if (cachedStats) {
+            var s = cachedStats;
+            statsBar =
+              '<div class="stats-bar">' +
+              '<div class="stat-item"><span class="stat-label">Total Spend</span><span class="stat-value">' + fmtCost(s.total_cost_usd) + '</span></div>' +
+              '<div class="stat-item"><span class="stat-label">Jobs</span><span class="stat-value">' + s.total_jobs + '</span></div>' +
+              '<div class="stat-item"><span class="stat-label">Input Tokens</span><span class="stat-value">' + fmtTokens(s.total_input_tokens) + '</span></div>' +
+              '<div class="stat-item"><span class="stat-label">Output Tokens</span><span class="stat-value">' + fmtTokens(s.total_output_tokens) + '</span></div>' +
+              '<div class="stat-item"><span class="stat-label">Cache Read</span><span class="stat-value">' + fmtTokens(s.total_cache_read_tokens) + '</span></div>' +
+              '</div>';
+          }
+
           var rows = jobs
             .map(function (j) {
               var pip = "pip-" + (j.status || "running");
               var ago = relTime(j.started_at);
+              var costStr = j.cost_usd ? fmtCost(j.cost_usd) : "";
               return (
                 '<a class="job-row" href="/jobs/' +
                 enc(j.id) +
@@ -736,6 +799,7 @@
                 '<span class="job-row-task">' +
                 h(j.task || "(untitled)") +
                 "</span>" +
+                (costStr ? '<span class="job-row-cost">' + costStr + "</span>" : "") +
                 '<span class="job-row-time">' +
                 ago +
                 "</span>" +
@@ -756,6 +820,7 @@
               (jobs.length !== 1 ? "s" : "") +
               "</p>" +
               "</div>" +
+              statsBar +
               '<div class="job-list">' +
               rows +
               "</div>",
@@ -771,6 +836,7 @@
         var toolIdx = 0;
         var ccIdx = -1;
         var ccLabel = "Claude Code";
+        var jobCostUSD = 0;
 
         function initJob(id) {
           document.title = "Job " + id.slice(0, 8) + " \u2013 Bob";
@@ -825,6 +891,8 @@
               '<a href="' +
               h(prLink) +
               '" target="_blank" class="chip chip-pr">&#8594; View PR</a>';
+          if (jobCostUSD > 0)
+            chips += '<span class="chip chip-cost">' + fmtCost(jobCostUSD) + '</span>';
           hdr.innerHTML =
             '<div class="job-hdr-title">' +
             h(taskText || "Loading\u2026") +
@@ -847,6 +915,12 @@
           if (ev.type === "job_started") {
             taskText = d.task || "";
             slackURL = d.slack_thread_url || "";
+          }
+          if (ev.type === "llm_response" && d.cost_usd !== undefined) {
+            jobCostUSD += d.cost_usd;
+          }
+          if ((ev.type === "job_completed" || ev.type === "job_error") && d.total_cost_usd !== undefined) {
+            jobCostUSD = d.total_cost_usd;
           }
           if (
             ev.type === "tool_completed" &&
@@ -1204,8 +1278,20 @@
                     "</span>"
                 : h(d.result_preview);
             }
-            case "llm_response":
-              return d.summary ? h(d.summary) : "";
+            case "llm_response": {
+              var parts = [];
+              if (d.summary) parts.push(h(d.summary));
+              if (d.input_tokens !== undefined) {
+                parts.push(
+                  "Tokens: " + fmtTokens(d.input_tokens) + " in / " +
+                  fmtTokens(d.output_tokens) + " out" +
+                  (d.cache_read_tokens ? " / " + fmtTokens(d.cache_read_tokens) + " cache read" : "") +
+                  (d.cache_write_tokens ? " / " + fmtTokens(d.cache_write_tokens) + " cache write" : "") +
+                  "  \u2192  " + fmtCost(d.cost_usd)
+                );
+              }
+              return parts.join("\n");
+            }
             case "job_started": {
               var parts = [];
               if (d.task) parts.push("Task     " + d.task);
@@ -1214,12 +1300,32 @@
               if (d.channel) parts.push("Channel  " + d.channel);
               return parts.length ? h(parts.join("\n")) : "";
             }
-            case "job_completed":
-              return d.final_response ? h(d.final_response) : "";
-            case "job_error":
-              return d.error
-                ? '<span style="color:var(--red)">' + h(d.error) + "</span>"
-                : "";
+            case "job_completed": {
+              var parts = [];
+              if (d.final_response) parts.push(h(d.final_response));
+              if (d.total_cost_usd !== undefined) {
+                var dur = d.total_duration_ms !== undefined ? "  Duration: " + fmtDuration(d.total_duration_ms) : "";
+                parts.push(
+                  "Total: " + fmtTokens(d.total_input_tokens) + " in / " +
+                  fmtTokens(d.total_output_tokens) + " out" +
+                  (d.total_cache_read_tokens ? " / " + fmtTokens(d.total_cache_read_tokens) + " cache read" : "") +
+                  "  \u2192  " + fmtCost(d.total_cost_usd) + dur
+                );
+              }
+              return parts.join("\n\n");
+            }
+            case "job_error": {
+              var parts = [];
+              if (d.error)
+                parts.push('<span style="color:var(--red)">' + h(d.error) + "</span>");
+              if (d.total_cost_usd !== undefined) {
+                parts.push(
+                  "Total: " + fmtTokens(d.total_input_tokens) + " in / " +
+                  fmtTokens(d.total_output_tokens) + " out  \u2192  " + fmtCost(d.total_cost_usd)
+                );
+              }
+              return parts.join("\n\n");
+            }
             default:
               return "";
           }
@@ -1231,6 +1337,31 @@
           ev.classList.toggle("open");
         }
         window.tog = tog;
+
+        // ── Cost / Token helpers ─────────────────────────────────────────────────────
+
+        function fmtCost(usd) {
+          if (usd === undefined || usd === null) return "";
+          if (usd < 0.01 && usd > 0) return "<$0.01";
+          return "$" + usd.toFixed(2);
+        }
+
+        function fmtTokens(n) {
+          if (n === undefined || n === null || n === 0) return "0";
+          if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
+          if (n >= 1e3) return (n / 1e3).toFixed(1) + "k";
+          return String(n);
+        }
+
+        function fmtDuration(ms) {
+          if (ms === undefined || ms === null) return "";
+          if (ms < 1000) return ms + "ms";
+          var s = ms / 1000;
+          if (s < 60) return s.toFixed(1) + "s";
+          var m = Math.floor(s / 60);
+          var rem = Math.floor(s % 60);
+          return m + "m " + rem + "s";
+        }
 
         // ── Helpers ───────────────────────────────────────────────────────────────────
 

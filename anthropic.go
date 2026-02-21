@@ -44,6 +44,21 @@ Do not share the PR link — the system handles that automatically.`
 
 const maxToolIterations = 15
 
+// Anthropic Claude Sonnet 4.5 pricing (USD per token).
+const (
+	priceInputPerToken      = 3.0 / 1_000_000
+	priceOutputPerToken     = 15.0 / 1_000_000
+	priceCacheReadPerToken  = 0.30 / 1_000_000
+	priceCacheWritePerToken = 3.75 / 1_000_000
+)
+
+func computeCost(input, output, cacheRead, cacheWrite int64) float64 {
+	return float64(input)*priceInputPerToken +
+		float64(output)*priceOutputPerToken +
+		float64(cacheRead)*priceCacheReadPerToken +
+		float64(cacheWrite)*priceCacheWritePerToken
+}
+
 type AnthropicLLM struct {
 	client     anthropic.Client
 	tools      []anthropic.ToolUnionParam
@@ -109,6 +124,7 @@ func (a *AnthropicLLM) Respond(ctx context.Context, messages []Message) (LLMResp
 	jobID := ""
 	prURL := ""
 	startTime := time.Now()
+	var totalInputTokens, totalOutputTokens, totalCacheReadTokens, totalCacheWriteTokens int64
 
 	for iter := range maxToolIterations {
 		// Emit LLMCall before each API call (only after job is created).
@@ -126,9 +142,28 @@ func (a *AnthropicLLM) Respond(ctx context.Context, messages []Message) (LLMResp
 			Tools:    a.tools,
 		})
 		if err != nil {
-			a.hub.Emit(jobID, EventJobError, map[string]any{"error": err.Error()})
+			a.hub.Emit(jobID, EventJobError, map[string]any{
+				"error":                   err.Error(),
+				"total_input_tokens":      totalInputTokens,
+				"total_output_tokens":     totalOutputTokens,
+				"total_cache_read_tokens": totalCacheReadTokens,
+				"total_cache_write_tokens": totalCacheWriteTokens,
+				"total_cost_usd":          computeCost(totalInputTokens, totalOutputTokens, totalCacheReadTokens, totalCacheWriteTokens),
+			})
 			return LLMResponse{}, fmt.Errorf("anthropic: %w", err)
 		}
+
+		// Extract token usage from response.
+		callInput := int64(resp.Usage.InputTokens)
+		callOutput := int64(resp.Usage.OutputTokens)
+		callCacheRead := int64(resp.Usage.CacheReadInputTokens)
+		callCacheWrite := int64(resp.Usage.CacheCreationInputTokens)
+		callCost := computeCost(callInput, callOutput, callCacheRead, callCacheWrite)
+
+		totalInputTokens += callInput
+		totalOutputTokens += callOutput
+		totalCacheReadTokens += callCacheRead
+		totalCacheWriteTokens += callCacheWrite
 
 		summary := summarizeLLMResponse(resp)
 
@@ -139,8 +174,13 @@ func (a *AnthropicLLM) Respond(ctx context.Context, messages []Message) (LLMResp
 				if block.Type == "text" {
 					if jobID != "" {
 						a.hub.Emit(jobID, EventJobCompleted, map[string]any{
-							"final_response":    block.Text,
-							"total_duration_ms": time.Since(startTime).Milliseconds(),
+							"final_response":           block.Text,
+							"total_duration_ms":        time.Since(startTime).Milliseconds(),
+							"total_input_tokens":       totalInputTokens,
+							"total_output_tokens":      totalOutputTokens,
+							"total_cache_read_tokens":  totalCacheReadTokens,
+							"total_cache_write_tokens": totalCacheWriteTokens,
+							"total_cost_usd":           computeCost(totalInputTokens, totalOutputTokens, totalCacheReadTokens, totalCacheWriteTokens),
 						})
 					}
 					return LLMResponse{Text: block.Text, IsJob: jobID != "", PRURL: prURL}, nil
@@ -154,6 +194,7 @@ func (a *AnthropicLLM) Respond(ctx context.Context, messages []Message) (LLMResp
 
 		// Pre-pass: handle start_job before any other tool so that subsequent
 		// tools in the same response batch can emit events under the new jobID.
+		startJobThisIter := false
 		for _, block := range resp.Content {
 			variant, ok := block.AsAny().(anthropic.ToolUseBlock)
 			if !ok || variant.Name != "start_job" || jobID != "" {
@@ -163,6 +204,7 @@ func (a *AnthropicLLM) Respond(ctx context.Context, messages []Message) (LLMResp
 				Task string `json:"task"`
 			}
 			json.Unmarshal(variant.Input, &input)
+			startJobThisIter = true
 			jobID = generateJobID()
 			channel, _ := ctx.Value(ctxKeyChannel).(string)
 			threadTS, _ := ctx.Value(ctxKeyThreadTS).(string)
@@ -183,10 +225,28 @@ func (a *AnthropicLLM) Respond(ctx context.Context, messages []Message) (LLMResp
 			// Backfill LLMCall and LLMResponse for this iteration.
 			a.hub.Emit(jobID, EventLLMCall, map[string]any{"iteration": iter})
 			a.hub.Emit(jobID, EventLLMResponse, map[string]any{
-				"stop_reason": string(resp.StopReason),
-				"summary":     summary,
+				"stop_reason":       string(resp.StopReason),
+				"summary":          summary,
+				"input_tokens":     callInput,
+				"output_tokens":    callOutput,
+				"cache_read_tokens":  callCacheRead,
+				"cache_write_tokens": callCacheWrite,
+				"cost_usd":         callCost,
 			})
 			break
+		}
+
+		// Emit LLMResponse for non-backfill iterations (backfill is handled above).
+		if jobID != "" && !startJobThisIter {
+			a.hub.Emit(jobID, EventLLMResponse, map[string]any{
+				"stop_reason":        string(resp.StopReason),
+				"summary":           summary,
+				"input_tokens":      callInput,
+				"output_tokens":     callOutput,
+				"cache_read_tokens":   callCacheRead,
+				"cache_write_tokens":  callCacheWrite,
+				"cost_usd":          callCost,
+			})
 		}
 
 		// Execute each tool call with monitoring context.
@@ -266,7 +326,12 @@ func (a *AnthropicLLM) Respond(ctx context.Context, messages []Message) (LLMResp
 	}
 
 	a.hub.Emit(jobID, EventJobError, map[string]any{
-		"error": fmt.Sprintf("exceeded max tool iterations (%d)", maxToolIterations),
+		"error":                    fmt.Sprintf("exceeded max tool iterations (%d)", maxToolIterations),
+		"total_input_tokens":      totalInputTokens,
+		"total_output_tokens":     totalOutputTokens,
+		"total_cache_read_tokens": totalCacheReadTokens,
+		"total_cache_write_tokens": totalCacheWriteTokens,
+		"total_cost_usd":          computeCost(totalInputTokens, totalOutputTokens, totalCacheReadTokens, totalCacheWriteTokens),
 	})
 	return LLMResponse{}, fmt.Errorf("anthropic: exceeded max tool iterations (%d)", maxToolIterations)
 }
