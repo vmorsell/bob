@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is Bob
 
-Bob is an LLM helper for a software team, integrated with Slack via the Events API. He runs as a containerized Go service behind a Cloudflare tunnel. When mentioned, Bob uses an LLM to generate responses, with full thread context when mentioned in a thread. Bob can interact with the team's GitHub organization — searching for repositories, cloning them, implementing code changes via Claude Code CLI, and creating pull requests.
+Bob is an LLM helper for a software team, integrated with Slack via the Events API. He runs as a containerized Go service behind a Cloudflare tunnel. When mentioned, Bob parses the intent of the request with a single Claude Haiku call, then drives a deterministic workflow to implement code changes and create pull requests.
 
 ## Build and run
 
@@ -25,37 +25,59 @@ Two-service Docker Compose setup:
 
 A named `workspace` volume is mounted at `/workspace` for persistent repo clones across restarts.
 
-Go code is split by webhook source for extensibility:
+Go code is organized by concern:
 
-- `main.go` — HTTP mux, routes mounted at `/webhooks/<source>` and `/jobs/`, `/api/jobs`, `/events`; wires up dependencies and tools
+- `main.go` — HTTP mux, routes mounted at `/webhooks/<source>` and `/jobs/`, `/api/jobs`, `/events`; wires up dependencies
 - `slack.go` — Slack handler: signature verification, `url_verification` challenge, `app_mention` event handling with thread context
-- `llm.go` — `LLM` interface and `Message`/`Role` types (adapter pattern)
-- `anthropic.go` — Anthropic adapter implementing `LLM` using Claude Sonnet via `anthropic-sdk-go`, with tool use loop and monitoring event emission
-- `tool.go` — `Tool` type bridging tool definitions and the Anthropic adapter
-- `git.go` — GitHub tools: `list_repos` (search org repos via GitHub REST API) and `clone_repo` (shallow clone to `/workspace`)
-- `claudecode.go` — `implement_changes` (run Claude Code CLI on a cloned repo, streaming output via `streamingWriter`) and `create_pull_request` (commit, push, open PR via GitHub API)
-- `tests.go` — `run_tests` (run a test/build command in a cloned repo and return output to the LLM)
-- `notify.go` — `SlackNotifier` for tools to post mid-execution messages; context keys for channel, threadTS, jobID, and hub
+- `llm.go` — `Message`/`Role` types (used by intent parser and slack thread parsing)
+- `intent.go` — `ParseIntent`: single Claude Haiku call that extracts `{Repo, Task}` or `{Question}` from a Slack conversation
+- `orchestrator.go` — `Orchestrator`: deterministic state machine driving verify → clone → implement → PR; calls `ParseIntent`, then `FindRepo`, `CloneRepo`, `ImplementChanges`, `CreatePullRequest` in sequence
+- `git.go` — Plain functions: `FindRepo` (GitHub REST API), `CloneRepo` (shallow clone to `/workspace`), `CreatePullRequest` (commit + push + GitHub API)
+- `claudecode.go` — `ImplementChanges`: runs Claude Code CLI, parses `TerminalState` JSON from output; `claudeStreamParser` for streaming JSON events
+- `util.go` — `truncate` helper
+- `notify.go` — `SlackNotifier` for posting mid-execution messages; context keys for channel, threadTS, jobID, and hub
 - `monitor.go` — `Hub` (SSE fan-out + JSONL persistence), event types, `streamingWriter`, REST handlers (`/api/jobs`, `/api/jobs/{id}`), SSE handler (`/events`), and dark-terminal web UI served at `/` and `/jobs/{id}`
 
-### Tool use pattern
+### Orchestration pattern
 
-The Anthropic adapter accepts a `[]Tool` at construction. During `Respond`, it runs a loop (max 15 iterations): if the model returns `stop_reason=tool_use`, execute each requested tool, send results back, and loop. Tool execution errors are returned to the model as `is_error=true` results for graceful recovery.
+Every Slack mention triggers one Claude Haiku call (`ParseIntent`) that returns either a `{Repo, Task}` pair or a `{Question}` for clarification. If a task is identified, the `Orchestrator` runs a deterministic sequence — no LLM involvement after intent parsing:
 
-New tools: create a constructor returning `Tool` (closing over config), register it in `main.go`.
+1. `FindRepo` — verify repo exists via GitHub API; reply + stop if not found
+2. Create monitoring job, post "On it!" to Slack
+3. `CloneRepo` — shallow clone to `/workspace`
+4. `ImplementChanges` — run Claude Code CLI; parses `TerminalState` from output
+5. Switch on `TerminalState.Status`:
+   - `completed` → `CreatePullRequest` → reply with PR URL
+   - `needs_information` → relay Claude Code's question to Slack
+   - `error` → relay error to Slack
+
+### Terminal state protocol
+
+`ImplementChanges` appends to every task prompt:
+
+```
+At the very end of your work, output a single JSON line (no code block):
+{"status":"completed","message":"Brief summary of what was done"}
+or {"status":"needs_information","message":"Specific question"}
+or {"status":"error","message":"What went wrong"}
+```
+
+`claudeStreamParser` scans every assistant text block for this JSON pattern, captures it as `TerminalState`, and suppresses it from Slack notifications. If absent (e.g. Claude Code crashed), `ImplementChanges` falls back to checking `git status`.
+
+### Multi-turn clarification
+
+Every Slack mention re-runs intent parsing on the full thread. Haiku sees the full conversation (including any prior "which repo?" exchange) and naturally extracts the now-complete intent. No state tracking needed — the thread is the state.
 
 ### Monitoring pattern
 
-On the **first `tool_use`** in `Respond()`, a UUID job ID is generated and a monitoring job is created in the `Hub`. Bob posts a Slack message with the job ID via `onJobStart`. All subsequent tool calls, LLM iterations, Claude Code output lines, and Slack notifications are emitted as `Event` values and:
+When a job starts (step 2 above), a UUID job ID is created and all subsequent tool calls and Claude Code output lines are emitted as `Event` values:
 1. Persisted to `/workspace/.bob/{jobID}.jsonl` (one JSON line per event)
 2. Fanned out to any connected SSE clients (`/events?job={id}`)
 
-The web UI at the tunnel root lists all jobs; `/jobs/{id}` shows the live event stream. Pure-text LLM responses (no tool use) produce no job and no Slack link.
+The web UI at the tunnel root lists all jobs; `/jobs/{id}` shows the live event stream. Clarification responses (no job started) produce no job entry.
 
 ### Notifier pattern
 
-`SlackNotifier` wraps the Slack client and reads channel/threadTS from context (injected by `slack.go`). Tools receive it at construction and call `notifier.Notify(ctx, text)` to post progress messages mid-execution. It also emits `EventSlackNotification` to the hub if jobID is in context. It no-ops if context values are missing.
+`SlackNotifier` wraps the Slack client and reads channel/threadTS from context (injected by `slack.go`). `ImplementChanges` passes it to `claudeStreamParser`, which calls `notifier.Notify(ctx, text)` for each assistant text block (minus the terminal state JSON). It also emits `EventSlackNotification` to the hub. It no-ops if context values are missing.
 
 New webhook sources (Linear, GitHub, etc.) get their own `<source>.go` file and `/webhooks/<source>` route.
-
-New LLM providers get their own `<provider>.go` file implementing the `LLM` interface.

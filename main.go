@@ -38,14 +38,6 @@ func main() {
 
 	hub := NewHub("/workspace/.bob")
 
-	tools := []Tool{
-		ListReposTool(githubOwner, githubToken),
-		CloneRepoTool(githubOwner, githubToken),
-		ImplementChangesTool(githubOwner, claudeCodeToken, notifier),
-		RunTestsTool(githubOwner),
-		CreatePullRequestTool(githubOwner, githubToken),
-	}
-
 	onJobStart := func(ctx context.Context, jobID string) {
 		msg := "On it!"
 		if bobURL != "" {
@@ -54,7 +46,7 @@ func main() {
 		notifier.Notify(ctx, msg)
 	}
 
-	llm := NewAnthropicLLM(anthropicKey, tools, hub, onJobStart)
+	orch := NewOrchestrator(anthropicKey, githubOwner, githubToken, claudeCodeToken, hub, notifier, onJobStart)
 
 	maxPerMinute := 15.0
 	if v := os.Getenv("MAX_INBOUND_MESSAGES_PER_MIN"); v != "" {
@@ -64,7 +56,7 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle("/webhooks/slack", NewSlackHandler(slackClient, signingSecret, llm, hub, maxPerMinute))
+	mux.Handle("/webhooks/slack", NewSlackHandler(slackClient, signingSecret, orch, hub, maxPerMinute))
 	mux.HandleFunc("/events", hub.ServeSSE)
 	mux.HandleFunc("/api/jobs/", hub.ServeJobAPI)
 	mux.HandleFunc("/api/jobs", hub.ServeJobList)

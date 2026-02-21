@@ -17,7 +17,7 @@ import (
 
 var mentionRe = regexp.MustCompile(`<@[A-Z0-9]+>\s*`)
 
-func NewSlackHandler(client *slack.Client, signingSecret string, llm LLM, hub *Hub, maxPerMinute float64) http.Handler {
+func NewSlackHandler(client *slack.Client, signingSecret string, orch *Orchestrator, hub *Hub, maxPerMinute float64) http.Handler {
 	limiter := rate.NewLimiter(rate.Limit(maxPerMinute/60), int(maxPerMinute/60)+1)
 
 	// Get our own bot user ID so we can identify our messages in threads.
@@ -84,7 +84,7 @@ func NewSlackHandler(client *slack.Client, signingSecret string, llm LLM, hub *H
 				}
 
 				// Respond async so Slack gets a timely 200 OK.
-				go handleMention(client, llm, botUserID, hub, ev)
+				go handleMention(client, orch, botUserID, hub, ev)
 			}
 		}
 	})
@@ -107,7 +107,7 @@ func replyRateLimited(client *slack.Client, ev *slackevents.AppMentionEvent) {
 	}
 }
 
-func handleMention(client *slack.Client, llm LLM, botUserID string, hub *Hub, ev *slackevents.AppMentionEvent) {
+func handleMention(client *slack.Client, orch *Orchestrator, botUserID string, hub *Hub, ev *slackevents.AppMentionEvent) {
 	// Acknowledge the mention immediately.
 	if err := client.AddReaction("construction_worker", slack.ItemRef{
 		Channel:   ev.Channel,
@@ -142,25 +142,26 @@ func handleMention(client *slack.Client, llm LLM, botUserID string, hub *Hub, ev
 	}
 
 	// Inject Slack context and hub so tools can send notifications mid-execution.
-	// jobID is generated lazily in Respond() on the first tool_use.
 	ctx := WithSlackThread(context.Background(), ev.Channel, threadTS)
 	ctx = WithMentionTS(ctx, ev.TimeStamp)
 	ctx = WithHub(ctx, hub)
 
-	resp, err := llm.Respond(ctx, messages)
+	result, err := orch.Orchestrate(ctx, messages)
 
 	removeReaction(client, ev.Channel, ev.TimeStamp)
 
 	var text string
 	if err != nil {
-		log.Printf("llm error: %v", err)
+		log.Printf("orchestrator error: %v", err)
 		text = fmt.Sprintf("<@%s> Sorry, I hit an error trying to respond. Please try again.", ev.User)
-	} else if resp.IsJob && resp.PRURL != "" {
-		text = fmt.Sprintf("<@%s> Done! %s", ev.User, resp.PRURL)
-	} else if resp.IsJob {
+	} else if result.IsJob && result.PRURL != "" {
+		text = fmt.Sprintf("<@%s> Done! %s", ev.User, result.PRURL)
+	} else if result.IsJob && result.Text != "" {
+		text = fmt.Sprintf("<@%s> %s", ev.User, result.Text)
+	} else if result.IsJob {
 		text = fmt.Sprintf("<@%s> Done!", ev.User)
 	} else {
-		text = fmt.Sprintf("<@%s> %s", ev.User, resp.Text)
+		text = fmt.Sprintf("<@%s> %s", ev.User, result.Text)
 	}
 
 	_, _, err = client.PostMessage(ev.Channel,
