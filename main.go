@@ -38,10 +38,24 @@ func main() {
 
 	hub := NewHub("/workspace/.bob")
 
-	onJobStart := func(ctx context.Context, jobID string) {
-		msg := "On it!"
-		if bobURL != "" {
-			msg = fmt.Sprintf("On it! Follow my progress here: <%s/jobs/%s>", bobURL, jobID)
+	onJobStart := func(ctx context.Context, jobID, phase string) {
+		var msg string
+		switch phase {
+		case "planning":
+			msg = "Working on a plan..."
+			if bobURL != "" {
+				msg = fmt.Sprintf("Working on a plan... Follow my progress here: <%s/jobs/%s>", bobURL, jobID)
+			}
+		case "implementation":
+			msg = "Implementing the approved plan..."
+			if bobURL != "" {
+				msg = fmt.Sprintf("Implementing the approved plan... Follow my progress here: <%s/jobs/%s>", bobURL, jobID)
+			}
+		default:
+			msg = "On it!"
+			if bobURL != "" {
+				msg = fmt.Sprintf("On it! Follow my progress here: <%s/jobs/%s>", bobURL, jobID)
+			}
 		}
 		notifier.Notify(ctx, msg)
 	}

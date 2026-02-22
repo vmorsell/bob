@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is Bob
 
-Bob is an LLM helper for a software team, integrated with Slack via the Events API. He runs as a containerized Go service behind a Cloudflare tunnel. When mentioned, Bob parses the intent of the request with a single Claude Haiku call, then drives a deterministic workflow to implement code changes and create pull requests.
+Bob is an LLM helper for a software team, integrated with Slack via the Events API. He runs as a containerized Go service behind a Cloudflare tunnel. When mentioned, Bob parses the intent of the request with a single Claude Haiku call, then drives a deterministic plan-first workflow: he explores the codebase, presents a plan for approval, and only implements and creates a pull request after the user approves.
 
 ## Build and run
 
@@ -30,26 +30,39 @@ Go code is organized by concern:
 - `main.go` — HTTP mux, routes mounted at `/webhooks/<source>` and `/jobs/`, `/api/jobs`, `/events`; wires up dependencies
 - `slack.go` — Slack handler: signature verification, `url_verification` challenge, `app_mention` event handling with thread context
 - `llm.go` — `Message`/`Role` types (used by intent parser and slack thread parsing)
-- `intent.go` — `ParseIntent`: single Claude Haiku call that extracts `{Repo, Task}` or `{Question}` from a Slack conversation
-- `orchestrator.go` — `Orchestrator`: deterministic state machine driving verify → clone → implement → PR; calls `ParseIntent`, then `FindRepo`, `CloneRepo`, `ImplementChanges`, `CreatePullRequest` in sequence
+- `intent.go` — `ParseIntent`: single Claude Haiku call that extracts `{Repo, Task, Question, PlanApproved, PlanFeedback}` from a Slack conversation; detects plan state via the `📋 *Plan*` marker
+- `orchestrator.go` — `Orchestrator`: three-path dispatch (planning / plan-feedback / implementation); calls `ParseIntent`, then routes to `executePlanning` or `executeImplementation`
 - `git.go` — Plain functions: `FindRepo` (GitHub REST API), `CloneRepo` (shallow clone to `/workspace`), `CreatePullRequest` (commit + push + GitHub API)
-- `claudecode.go` — `ImplementChanges`: runs Claude Code CLI, parses `TerminalState` JSON from output; `claudeStreamParser` for streaming JSON events
+- `claudecode.go` — `runClaudeCode` (shared CLI logic), `GeneratePlan` (prompt-enforced read-only), `ImplementChanges` (implementation mode); `claudeStreamParser` for streaming JSON events
 - `util.go` — `truncate` helper
 - `notify.go` — `SlackNotifier` for posting mid-execution messages; context keys for channel, threadTS, jobID, and hub
 - `monitor.go` — `Hub` (SSE fan-out + JSONL persistence), event types, `streamingWriter`, REST handlers (`/api/jobs`, `/api/jobs/{id}`), SSE handler (`/events`), and dark-terminal web UI served at `/` and `/jobs/{id}`
 
-### Orchestration pattern
+### Orchestration pattern (plan-first workflow)
 
-Every Slack mention triggers one Claude Haiku call (`ParseIntent`) that returns either a `{Repo, Task}` pair or a `{Question}` for clarification. If a task is identified, the `Orchestrator` runs a deterministic sequence — no LLM involvement after intent parsing:
+Every Slack mention triggers one Claude Haiku call (`ParseIntent`) that returns `{Repo, Task, Question, PlanApproved, PlanFeedback}`. The orchestrator then dispatches to one of three paths:
 
-1. `FindRepo` — verify repo exists via GitHub API; reply + stop if not found
-2. Create monitoring job, post "On it!" to Slack
+**Fresh request or plan feedback → `executePlanning`:**
+1. `FindRepo` — verify repo exists via GitHub API
+2. `getOrCreateJob` — reuse the active job for this Slack thread, or create a new one
 3. `CloneRepo` — shallow clone to `/workspace`
-4. `ImplementChanges` — run Claude Code CLI; parses `TerminalState` from output
-5. Switch on `TerminalState.Status`:
-   - `completed` → `CreatePullRequest` → reply with PR URL
-   - `needs_information` → relay Claude Code's question to Slack
-   - `error` → relay error to Slack
+4. `GeneratePlan` — run Claude Code CLI with prompt-enforced read-only mode (no `--permission-mode plan`; uses `--dangerously-skip-permissions` with explicit "do not modify files" instructions)
+5. Format plan with `📋 *Plan*` marker and approval footer → reply to Slack
+6. Job stays **open** — same job ID is reused for feedback rounds and implementation
+
+**Plan approval → `executeImplementation`:**
+1. `extractPlanFromThread` — find the most recent `📋 *Plan*` in thread
+2. `getOrCreateJob` — reuse the active job for this thread (same monitoring link)
+3. `CloneRepo` → `ImplementChanges` with the approved plan in the prompt
+4. `completed` → `CreatePullRequest` → reply with PR URL → job **closed**
+
+**Question → return clarification (no job created)**
+
+**Unified job per thread:** A single monitoring job spans the entire planning → feedback → implementation lifecycle within a Slack thread. `Hub.threadJobs` maps `channel:threadTS` to the active job ID. The job is created on first mention and only closed when a PR is created, an error occurs, or the thread starts a fresh request. This means one monitoring link per thread — the user sees planning events and implementation events in the same timeline.
+
+Plan state detection: Haiku detects the `📋 *Plan*` marker in assistant messages. If present and the user's latest message is an approval ("go", "lgtm", etc.), `PlanApproved` is set. If the user provides feedback, `PlanFeedback` is set. Thread-as-state handles unlimited revision rounds.
+
+**Why prompt-based planning:** `--permission-mode plan` doesn't actually restrict tools when combined with `--dangerously-skip-permissions` (the skip flag overrides plan mode). So planning uses prompt instructions to enforce read-only behavior instead.
 
 ### Terminal state protocol
 

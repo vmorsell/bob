@@ -22,31 +22,36 @@ or
 or
 {"status":"error","message":"What went wrong"}`
 
+// planMarker is the prefix used in formatted plan messages posted to Slack.
+// The intent parser uses it to detect whether a plan has been posted in the thread.
+const planMarker = "\U0001f4cb *Plan*"
+
 // TerminalState is the structured outcome reported by Claude Code at the end of its run.
 type TerminalState struct {
 	Status  string `json:"status"`  // "completed", "needs_information", or "error"
 	Message string `json:"message"` // summary, question, or error description
 }
 
-// ImplementChanges runs Claude Code CLI in the given repo to implement the task.
-// It parses the terminal state JSON from Claude Code's output and returns it.
-func ImplementChanges(ctx context.Context, claudeCodeToken string, notifier *SlackNotifier, repoName, task string) (TerminalState, error) {
+// runClaudeCode executes the Claude Code CLI in the given repo directory.
+// When suppressResultNotify is true, the final "result" text is not forwarded to Slack
+// (used during planning so the plan isn't double-posted).
+func runClaudeCode(ctx context.Context, claudeCodeToken string, notifier *SlackNotifier, repoName, prompt string, suppressResultNotify bool) (*claudeStreamParser, error) {
 	repoName = filepath.Base(repoName)
 	repoDir := filepath.Join("/workspace", repoName)
 
 	if _, err := os.Stat(repoDir); os.IsNotExist(err) {
-		return TerminalState{}, fmt.Errorf("repository %q not found at %s", repoName, repoDir)
+		return nil, fmt.Errorf("repository %q not found at %s", repoName, repoDir)
 	}
 
 	// Reset to clean state.
 	chownRoot := exec.CommandContext(ctx, "chown", "-R", "0:0", repoDir)
 	if out, err := chownRoot.CombinedOutput(); err != nil {
-		return TerminalState{}, fmt.Errorf("chown to root failed: %s: %w", out, err)
+		return nil, fmt.Errorf("chown to root failed: %s: %w", out, err)
 	}
 	resetCmd := exec.CommandContext(ctx, "sh", "-c", "git checkout . && git clean -fd && git checkout main && git pull")
 	resetCmd.Dir = repoDir
 	if out, err := resetCmd.CombinedOutput(); err != nil {
-		return TerminalState{}, fmt.Errorf("git reset failed: %s: %w", out, err)
+		return nil, fmt.Errorf("git reset failed: %s: %w", out, err)
 	}
 
 	// Run Claude Code CLI with a 15-minute timeout.
@@ -56,16 +61,16 @@ func ImplementChanges(ctx context.Context, claudeCodeToken string, notifier *Sla
 	// Ensure worker owns the repo for Claude CLI.
 	chown := exec.CommandContext(cliCtx, "chown", "-R", "1000:1000", repoDir)
 	if out, err := chown.CombinedOutput(); err != nil {
-		return TerminalState{}, fmt.Errorf("chown failed: %s: %w", out, err)
+		return nil, fmt.Errorf("chown failed: %s: %w", out, err)
 	}
 
-	fullTask := task + terminalStatePromptSuffix
 	args := []string{
-		"-p", fullTask,
+		"-p", prompt,
 		"--output-format", "stream-json",
 		"--verbose",
 		"--dangerously-skip-permissions",
 	}
+
 	cmd := exec.CommandContext(cliCtx, "claude", args...)
 	cmd.Dir = repoDir
 	cmd.Env = append(os.Environ(), "CLAUDE_CODE_OAUTH_TOKEN="+claudeCodeToken, "HOME=/home/worker")
@@ -73,7 +78,7 @@ func ImplementChanges(ctx context.Context, claudeCodeToken string, notifier *Sla
 		Credential: &syscall.Credential{Uid: 1000, Gid: 1000},
 	}
 
-	sp := newClaudeStreamParser(HubFromCtx(ctx), JobIDFromCtx(ctx), notifier, ctx)
+	sp := newClaudeStreamParser(HubFromCtx(ctx), JobIDFromCtx(ctx), notifier, ctx, suppressResultNotify)
 	cmd.Stdout = sp
 	cmd.Stderr = sp
 	runErr := cmd.Run()
@@ -82,11 +87,75 @@ func ImplementChanges(ctx context.Context, claudeCodeToken string, notifier *Sla
 	// Use parent ctx, not cliCtx — the CLI timeout may already be exceeded.
 	chownBack := exec.CommandContext(ctx, "chown", "-R", "0:0", repoDir)
 	if out, chownErr := chownBack.CombinedOutput(); chownErr != nil {
-		return TerminalState{}, fmt.Errorf("chown back failed: %s: %w", out, chownErr)
+		return nil, fmt.Errorf("chown back failed: %s: %w", out, chownErr)
 	}
 
 	if runErr != nil {
-		return TerminalState{}, fmt.Errorf("claude code failed: %s: %w", truncate(sp.raw.String(), 500), runErr)
+		return nil, fmt.Errorf("claude code failed: %s: %w", truncate(sp.raw.String(), 500), runErr)
+	}
+
+	return sp, nil
+}
+
+// GeneratePlan runs Claude Code to explore the codebase and produce a plan.
+// Read-only behavior is enforced via prompt instructions (not --permission-mode plan,
+// which doesn't work with --dangerously-skip-permissions).
+// threadMessages provides conversation context (prior Q&A, previous plans, feedback).
+func GeneratePlan(ctx context.Context, claudeCodeToken string, notifier *SlackNotifier, repoName, task string, threadMessages []Message) (TerminalState, error) {
+	var sb strings.Builder
+	sb.WriteString("## Planning Mode — READ ONLY\n\n")
+	sb.WriteString("You are exploring this codebase to create a detailed implementation plan.\n\n")
+	sb.WriteString("IMPORTANT: Do NOT modify any files. Do NOT use Edit, Write, NotebookEdit, or Bash ")
+	sb.WriteString("commands that modify files. Only use read-only tools: Read, Glob, Grep, and Task ")
+	sb.WriteString("(with Explore agents).\n\n")
+
+	if len(threadMessages) > 0 {
+		sb.WriteString("## Conversation context\n\n")
+		for _, msg := range threadMessages {
+			switch msg.Role {
+			case RoleUser:
+				sb.WriteString("User: ")
+			case RoleAssistant:
+				sb.WriteString("Assistant: ")
+			}
+			sb.WriteString(msg.Content)
+			sb.WriteString("\n\n")
+		}
+		sb.WriteString("---\n\n")
+	}
+	sb.WriteString("## Task\n\n")
+	sb.WriteString(task)
+	sb.WriteString("\n\n")
+	sb.WriteString("Explore the codebase thoroughly. Consider existing architecture, patterns, and ")
+	sb.WriteString("conventions. Produce a detailed, step-by-step implementation plan.")
+	sb.WriteString(terminalStatePromptSuffix)
+
+	sp, err := runClaudeCode(ctx, claudeCodeToken, notifier, repoName, sb.String(), true)
+	if err != nil {
+		return TerminalState{}, err
+	}
+
+	if sp.terminalState.Status != "" {
+		return sp.terminalState, nil
+	}
+
+	return TerminalState{Status: "completed", Message: sp.output()}, nil
+}
+
+// ImplementChanges runs Claude Code CLI in the given repo to implement the task.
+// If plan is non-empty, the prompt instructs Claude Code to follow the approved plan.
+func ImplementChanges(ctx context.Context, claudeCodeToken string, notifier *SlackNotifier, repoName, task, plan string) (TerminalState, error) {
+	var prompt string
+	if plan != "" {
+		prompt = fmt.Sprintf("## Task\n\n%s\n\n## Approved Plan\n\nFollow this plan exactly:\n\n%s", task, plan)
+	} else {
+		prompt = task
+	}
+	prompt += terminalStatePromptSuffix
+
+	sp, err := runClaudeCode(ctx, claudeCodeToken, notifier, repoName, prompt, false) // suppressResultNotify=false: notify Slack with results
+	if err != nil {
+		return TerminalState{}, err
 	}
 
 	// Use parsed terminal state if Claude Code emitted one.
@@ -95,6 +164,8 @@ func ImplementChanges(ctx context.Context, claudeCodeToken string, notifier *Sla
 	}
 
 	// Fall back: check if changes were made.
+	repoName = filepath.Base(repoName)
+	repoDir := filepath.Join("/workspace", repoName)
 	statusCmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
 	statusCmd.Dir = repoDir
 	statusOut, err := statusCmd.Output()
@@ -111,25 +182,27 @@ func ImplementChanges(ctx context.Context, claudeCodeToken string, notifier *Sla
 // Claude Code CLI, emitting real-time hub events for each reasoning step and
 // tool call, while also collecting the final result text and terminal state.
 type claudeStreamParser struct {
-	hub               *Hub
-	jobID             string
-	notifier          *SlackNotifier
-	ctx               context.Context
-	lineBuf           []byte
-	raw               bytes.Buffer // full raw bytes, for error messages
-	result            string       // text from the final "result" event
-	terminalState     TerminalState
-	pendingTaskDescs  map[string]string // tool_use_id → Task description
-	thinkingStartedAt time.Time        // wall-clock when last thinking block was seen
+	hub                  *Hub
+	jobID                string
+	notifier             *SlackNotifier
+	ctx                  context.Context
+	lineBuf              []byte
+	raw                  bytes.Buffer  // full raw bytes, for error messages
+	result               string        // text from the final "result" event
+	terminalState        TerminalState
+	suppressResultNotify bool              // when true, don't forward the final "result" to Slack
+	pendingTaskDescs     map[string]string // tool_use_id → Task description
+	thinkingStartedAt    time.Time         // wall-clock when last thinking block was seen
 }
 
-func newClaudeStreamParser(hub *Hub, jobID string, notifier *SlackNotifier, ctx context.Context) *claudeStreamParser {
+func newClaudeStreamParser(hub *Hub, jobID string, notifier *SlackNotifier, ctx context.Context, suppressResultNotify bool) *claudeStreamParser {
 	return &claudeStreamParser{
-		hub:              hub,
-		jobID:            jobID,
-		notifier:         notifier,
-		ctx:              ctx,
-		pendingTaskDescs: make(map[string]string),
+		hub:                  hub,
+		jobID:                jobID,
+		notifier:             notifier,
+		ctx:                  ctx,
+		suppressResultNotify: suppressResultNotify,
+		pendingTaskDescs:     make(map[string]string),
 	}
 }
 
@@ -297,8 +370,8 @@ func (p *claudeStreamParser) processLine(line string) {
 				p.emit(textLine)
 			}
 		}
-		// Notify Slack with the final summary.
-		if p.notifier != nil && strings.TrimSpace(p.result) != "" {
+		// Notify Slack with the final summary (unless suppressed, e.g. during planning).
+		if p.notifier != nil && strings.TrimSpace(p.result) != "" && !p.suppressResultNotify {
 			p.notifier.Notify(p.ctx, p.result)
 		}
 	case "rate_limit_event":

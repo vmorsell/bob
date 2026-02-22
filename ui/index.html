@@ -983,11 +983,11 @@
 
           // tool_started
           if (ev.type === "tool_started") {
-            var isCCTool = d.tool_name === "implement_changes" || d.tool_name === "run_tests";
+            var isCCTool = d.tool_name === "implement_changes" || d.tool_name === "run_tests" || d.tool_name === "generate_plan";
 
             if (isCCTool) {
               ccIdx = toolIdx;
-              ccLabel = d.tool_name === "run_tests" ? "Run Tests" : "Claude Code";
+              ccLabel = d.tool_name === "run_tests" ? "Run Tests" : d.tool_name === "generate_plan" ? "Planning" : "Claude Code";
 
               var sec = document.createElement("div");
               sec.className = "cc-section expanded" + (d.tool_name === "run_tests" ? " cc-section-terminal" : "");
@@ -1014,7 +1014,7 @@
 
           // tool_completed
           if (ev.type === "tool_completed") {
-            var isCCTool = d.tool_name === "implement_changes" || d.tool_name === "run_tests";
+            var isCCTool = d.tool_name === "implement_changes" || d.tool_name === "run_tests" || d.tool_name === "generate_plan";
 
             if (isCCTool) {
               var sec = document.getElementById("cc-sec-" + ccIdx);

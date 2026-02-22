@@ -16,13 +16,23 @@ Given the Slack conversation, extract:
 - repo: the repository name (just the short name, e.g. "letsmeet" — never owner/repo)
 - task: a clear description of the coding work to do (implement, fix, review, refactor, etc.)
 - question: a single clarifying question ONLY if you genuinely cannot identify the repo name or task at all
+- plan_approved: set to true ONLY when the user's latest message approves an existing plan (e.g. "go", "approved", "looks good", "ship it", "lgtm")
+- plan_feedback: set to the user's feedback ONLY when the user's latest message responds to an existing plan with requested changes or additions (NOT when approving)
 
-Respond with JSON only: {"repo":"...","task":"...","question":""}
+How to detect plan state:
+- Look for the marker "📋 *Plan*" in assistant messages. If present, a plan has been posted.
+- If a plan exists AND the user's latest message is an approval → set plan_approved: true
+- If a plan exists AND the user's latest message contains feedback/changes → set plan_feedback to the feedback text
+- If no plan exists OR the user is making a fresh request → extract repo + task as normal
+- When plan_approved or plan_feedback is set, ALSO extract repo and task from the thread context
+
+Respond with JSON only: {"repo":"...","task":"...","question":"","plan_approved":false,"plan_feedback":""}
 Rules:
 - If a repo name is mentioned, even informally, extract it. Do not ask to confirm it.
 - If a task is implied (fix bugs, add feature, review code, etc.) describe it clearly.
 - Set question only when truly stuck — never to ask about org, owner, access, or credentials.
-- If question is set, leave repo and task empty.`
+- If question is set, leave repo and task empty.
+- plan_approved and plan_feedback are mutually exclusive — never set both.`
 
 // Claude Haiku 4.5 pricing (USD per token).
 const (
@@ -41,9 +51,11 @@ func computeIntentCost(input, output, cacheRead, cacheWrite int64) float64 {
 
 // IntentResult holds the structured output of an intent parse.
 type IntentResult struct {
-	Repo     string `json:"repo"`
-	Task     string `json:"task"`
-	Question string `json:"question"`
+	Repo         string `json:"repo"`
+	Task         string `json:"task"`
+	Question     string `json:"question"`
+	PlanApproved bool   `json:"plan_approved"`
+	PlanFeedback string `json:"plan_feedback"`
 	// Token usage for cost tracking.
 	InputTokens      int64
 	OutputTokens     int64
@@ -68,7 +80,7 @@ func ParseIntent(ctx context.Context, apiKey string, messages []Message) (Intent
 
 	resp, err := client.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:     anthropic.ModelClaudeHaiku4_5_20251001,
-		MaxTokens: 256,
+		MaxTokens: 512,
 		System: []anthropic.TextBlockParam{
 			{Text: intentSystemPrompt},
 		},

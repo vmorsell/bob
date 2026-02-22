@@ -58,6 +58,9 @@ type Hub struct {
 	seq       uint64
 	dataDir   string
 	jobFiles  map[string]*os.File
+
+	threadMu   sync.Mutex
+	threadJobs map[string]string // "channel:threadTS" → jobID
 }
 
 // NewHub creates a Hub that persists events under dataDir and starts the run goroutine.
@@ -66,10 +69,11 @@ func NewHub(dataDir string) *Hub {
 		log.Printf("hub: failed to create data dir %s: %v", dataDir, err)
 	}
 	h := &Hub{
-		clients:   make(map[*sseClient]struct{}),
-		broadcast: make(chan Event, 4096),
-		dataDir:   dataDir,
-		jobFiles:  make(map[string]*os.File),
+		clients:    make(map[*sseClient]struct{}),
+		broadcast:  make(chan Event, 4096),
+		dataDir:    dataDir,
+		jobFiles:   make(map[string]*os.File),
+		threadJobs: make(map[string]string),
 	}
 	go h.run()
 	return h
@@ -93,6 +97,36 @@ func (h *Hub) Emit(jobID string, t EventType, data map[string]any) {
 	default:
 		log.Printf("hub: broadcast channel full, dropping %s for job %s", t, jobID)
 	}
+}
+
+// ActiveJobForThread returns the active job ID for a Slack thread, or empty string.
+func (h *Hub) ActiveJobForThread(channel, threadTS string) string {
+	if h == nil {
+		return ""
+	}
+	h.threadMu.Lock()
+	defer h.threadMu.Unlock()
+	return h.threadJobs[channel+":"+threadTS]
+}
+
+// RegisterThreadJob associates a Slack thread with an active job ID.
+func (h *Hub) RegisterThreadJob(channel, threadTS, jobID string) {
+	if h == nil {
+		return
+	}
+	h.threadMu.Lock()
+	defer h.threadMu.Unlock()
+	h.threadJobs[channel+":"+threadTS] = jobID
+}
+
+// UnregisterThreadJob removes the thread→job mapping when a job closes.
+func (h *Hub) UnregisterThreadJob(channel, threadTS string) {
+	if h == nil {
+		return
+	}
+	h.threadMu.Lock()
+	defer h.threadMu.Unlock()
+	delete(h.threadJobs, channel+":"+threadTS)
 }
 
 // run processes the broadcast channel — single goroutine owns jobFiles.
