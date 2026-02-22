@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"strings"
@@ -377,6 +379,8 @@ func formatPlanMessage(plan string) string {
 }
 
 // taskBranchName generates a git-safe branch name from a task description.
+// A random 4-byte hex suffix is appended to avoid collisions when the same
+// task is retried or when different tasks produce the same slug.
 func taskBranchName(task string) string {
 	slug := strings.ToLower(task)
 	var b strings.Builder
@@ -395,5 +399,8 @@ func taskBranchName(task string) string {
 	if len(s) > 50 {
 		s = s[:50]
 	}
-	return "bob/" + s
+
+	var suffix [4]byte
+	rand.Read(suffix[:])
+	return "bob/" + s + "-" + hex.EncodeToString(suffix[:])
 }
