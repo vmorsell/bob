@@ -701,6 +701,38 @@
         color: var(--red);
       }
 
+      /* ── Approve button ── */
+      .approve-wrap {
+        padding: 12px 18px;
+      }
+      .approve-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 20px;
+        border: none;
+        border-radius: var(--radius-sm);
+        background: var(--green);
+        color: #fff;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: opacity 0.15s;
+      }
+      .approve-btn:hover {
+        opacity: 0.85;
+      }
+      .approve-btn:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      .approve-done {
+        padding: 8px 18px;
+        font-size: 14px;
+        color: var(--green);
+        font-weight: 500;
+      }
+
       /* ── Scrollbar ── */
       ::-webkit-scrollbar {
         width: 6px;
@@ -823,6 +855,8 @@
         var pendingReads = [];        // buffer for consecutive Read tool calls
         var pendingThinkingEls = [];  // [{el, ts}] waiting for duration update
         var isLive = false;
+        var currentJobID = "";
+        var approveEl = null;         // current approve button wrapper element
 
         function initJob(id) {
           document.title = "Job " + id.slice(0, 8) + " \u2013 Bob";
@@ -951,6 +985,20 @@
           if (ev.type === "job_started") {
             taskText = d.task || "";
             slackURL = d.slack_thread_url || "";
+            currentJobID = ev.job_id || "";
+            return;
+          }
+
+          // plan_generated: show approve button below the plan.
+          if (ev.type === "plan_generated") {
+            var list = document.getElementById("evlist");
+            if (list) {
+              var wrap = document.createElement("div");
+              wrap.className = "approve-wrap";
+              wrap.innerHTML = '<button class="approve-btn" onclick="window._approvePlan()">Approve Plan</button>';
+              list.appendChild(wrap);
+              approveEl = wrap;
+            }
             return;
           }
 
@@ -983,6 +1031,12 @@
 
           // tool_started
           if (ev.type === "tool_started") {
+            // Hide approve button when implementation begins.
+            if (d.tool_name === "implement_changes" && approveEl) {
+              approveEl.remove();
+              approveEl = null;
+            }
+
             var isCCTool = d.tool_name === "implement_changes" || d.tool_name === "run_tests" || d.tool_name === "generate_plan";
 
             if (isCCTool) {
@@ -1042,6 +1096,7 @@
 
           // job_completed
           if (ev.type === "job_completed") {
+            if (approveEl) { approveEl.remove(); approveEl = null; }
             var footer = createJobFooter(false, d);
             list.appendChild(footer);
             return;
@@ -1049,6 +1104,7 @@
 
           // job_error
           if (ev.type === "job_error") {
+            if (approveEl) { approveEl.remove(); approveEl = null; }
             var footer = createJobFooter(true, d);
             list.appendChild(footer);
             return;
@@ -1363,6 +1419,30 @@
           var rem = Math.floor(s % 60);
           return m + "m " + rem + "s";
         }
+
+        // ── Approve plan ──────────────────────────────────────────────────────────────
+
+        window._approvePlan = function () {
+          if (!currentJobID) return;
+          var btn = approveEl ? approveEl.querySelector(".approve-btn") : null;
+          if (btn) {
+            btn.disabled = true;
+            btn.textContent = "Approving\u2026";
+          }
+          fetch("/api/jobs/" + enc(currentJobID) + "/approve", { method: "POST" })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+              if (approveEl) {
+                approveEl.innerHTML = '<div class="approve-done">\u2713 Approved</div>';
+              }
+            })
+            .catch(function () {
+              if (btn) {
+                btn.disabled = false;
+                btn.textContent = "Approve Plan";
+              }
+            });
+        };
 
         // ── Helpers ───────────────────────────────────────────────────────────────────
 

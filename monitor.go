@@ -32,6 +32,7 @@ const (
 	EventClaudeCodeLine    EventType = "claude_code_line"
 	EventToolCompleted     EventType = "tool_completed"
 	EventSlackNotification EventType = "slack_notification"
+	EventPlanGenerated     EventType = "plan_generated"
 	EventJobCompleted      EventType = "job_completed"
 	EventJobError          EventType = "job_error"
 )
@@ -50,6 +51,12 @@ type sseClient struct {
 	send  chan []byte
 }
 
+// JobMeta stores Slack thread coordinates for a job (reverse lookup for web UI approval).
+type JobMeta struct {
+	Channel  string
+	ThreadTS string
+}
+
 // Hub manages SSE clients, persists events to JSONL files, and fans out events.
 type Hub struct {
 	mu        sync.RWMutex
@@ -61,6 +68,10 @@ type Hub struct {
 
 	threadMu   sync.Mutex
 	threadJobs map[string]string // "channel:threadTS" → jobID
+
+	implementingJobs sync.Map // jobID → struct{}, double-approval guard
+	planMsgTS        sync.Map // jobID → plan message timestamp (string)
+	jobMeta          sync.Map // jobID → JobMeta
 }
 
 // NewHub creates a Hub that persists events under dataDir and starts the run goroutine.
@@ -117,6 +128,7 @@ func (h *Hub) RegisterThreadJob(channel, threadTS, jobID string) {
 	h.threadMu.Lock()
 	defer h.threadMu.Unlock()
 	h.threadJobs[channel+":"+threadTS] = jobID
+	h.jobMeta.Store(jobID, JobMeta{Channel: channel, ThreadTS: threadTS})
 }
 
 // UnregisterThreadJob removes the thread→job mapping when a job closes.
@@ -127,6 +139,64 @@ func (h *Hub) UnregisterThreadJob(channel, threadTS string) {
 	h.threadMu.Lock()
 	defer h.threadMu.Unlock()
 	delete(h.threadJobs, channel+":"+threadTS)
+}
+
+// TryStartImplementation atomically marks a job as implementing.
+// Returns true if this call won the race, false if already implementing.
+func (h *Hub) TryStartImplementation(jobID string) bool {
+	if h == nil {
+		return false
+	}
+	_, loaded := h.implementingJobs.LoadOrStore(jobID, struct{}{})
+	return !loaded
+}
+
+// ClearImplementation removes the implementing guard so a retry is possible.
+func (h *Hub) ClearImplementation(jobID string) {
+	if h == nil {
+		return
+	}
+	h.implementingJobs.Delete(jobID)
+}
+
+// SetPlanMsgTS stores the Slack message timestamp of the plan message for a job.
+func (h *Hub) SetPlanMsgTS(jobID, ts string) {
+	if h == nil {
+		return
+	}
+	h.planMsgTS.Store(jobID, ts)
+}
+
+// GetPlanMsgTS returns the stored plan message timestamp for a job.
+func (h *Hub) GetPlanMsgTS(jobID string) string {
+	if h == nil {
+		return ""
+	}
+	v, ok := h.planMsgTS.Load(jobID)
+	if !ok {
+		return ""
+	}
+	return v.(string)
+}
+
+// SetJobMeta stores the Slack thread coordinates for a job.
+func (h *Hub) SetJobMeta(jobID string, meta JobMeta) {
+	if h == nil {
+		return
+	}
+	h.jobMeta.Store(jobID, meta)
+}
+
+// GetJobMeta returns the stored Slack thread coordinates for a job.
+func (h *Hub) GetJobMeta(jobID string) (JobMeta, bool) {
+	if h == nil {
+		return JobMeta{}, false
+	}
+	v, ok := h.jobMeta.Load(jobID)
+	if !ok {
+		return JobMeta{}, false
+	}
+	return v.(JobMeta), true
 }
 
 // run processes the broadcast channel — single goroutine owns jobFiles.

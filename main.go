@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/slack-go/slack"
 )
@@ -35,6 +36,14 @@ func main() {
 
 	slackClient := slack.New(botToken)
 	notifier := NewSlackNotifier(slackClient)
+
+	// Resolve bot user ID once at startup.
+	authResp, err := slackClient.AuthTest()
+	if err != nil {
+		log.Fatalf("slack auth test failed: %v", err)
+	}
+	botUserID := authResp.UserID
+	log.Printf("Bot user ID: %s", botUserID)
 
 	hub := NewHub("/workspace/.bob")
 
@@ -69,10 +78,36 @@ func main() {
 		}
 	}
 
+	approver := NewApprover(slackClient, hub, orch, botUserID)
+
 	mux := http.NewServeMux()
-	mux.Handle("/webhooks/slack", NewSlackHandler(slackClient, signingSecret, orch, hub, maxPerMinute))
+	mux.Handle("/webhooks/slack", NewSlackHandler(slackClient, signingSecret, orch, hub, botUserID, maxPerMinute))
+	mux.Handle("/webhooks/slack/interactions", NewSlackInteractionHandler(slackClient, signingSecret, approver))
 	mux.HandleFunc("/events", hub.ServeSSE)
-	mux.HandleFunc("/api/jobs/", hub.ServeJobAPI)
+	mux.HandleFunc("/api/jobs/", func(w http.ResponseWriter, r *http.Request) {
+		// POST /api/jobs/{id}/approve — web UI approval endpoint.
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/approve") {
+			path := strings.TrimPrefix(r.URL.Path, "/api/jobs/")
+			jobID := strings.TrimSuffix(path, "/approve")
+			if jobID == "" {
+				http.Error(w, `{"error":"missing job id"}`, http.StatusBadRequest)
+				return
+			}
+
+			meta, ok := hub.GetJobMeta(jobID)
+			if !ok || meta.Channel == "" || meta.ThreadTS == "" {
+				http.Error(w, `{"error":"job not found or missing Slack thread info"}`, http.StatusNotFound)
+				return
+			}
+
+			go approver.Approve(context.Background(), jobID, meta.Channel, meta.ThreadTS, "web UI")
+
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"ok":true}`))
+			return
+		}
+		hub.ServeJobAPI(w, r)
+	})
 	mux.HandleFunc("/api/jobs", hub.ServeJobList)
 	mux.HandleFunc("/api/stats", hub.ServeStats)
 	mux.HandleFunc("/jobs/", serveUI)

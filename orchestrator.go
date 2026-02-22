@@ -8,13 +8,18 @@ import (
 	"log"
 	"strings"
 	"time"
+
+	"github.com/slack-go/slack"
 )
 
 // OrchestratorResult is the outcome of an orchestration run.
 type OrchestratorResult struct {
-	Text  string // text reply for clarifying questions or errors
-	IsJob bool   // true if a monitoring job was started
-	PRURL string // set if a pull request was created
+	Text       string        // text reply for clarifying questions or errors
+	IsJob      bool          // true if a monitoring job was started
+	PRURL      string        // set if a pull request was created
+	PlanBlocks []slack.Block // set when plan is generated (for Block Kit message)
+	PlanText   string        // full plan text with marker (for MsgOptionText fallback)
+	JobID      string        // job ID (for storing plan msg TS)
 }
 
 // Orchestrator drives the deterministic coding workflow.
@@ -206,8 +211,17 @@ func (o *Orchestrator) executePlanning(ctx context.Context, messages []Message, 
 	}
 
 	// status == "completed" — format and return the plan. Job stays open for feedback/approval.
-	planMessage := formatPlanMessage(state.Message)
-	return OrchestratorResult{IsJob: true, Text: planMessage}, nil
+	o.hub.Emit(jobID, EventPlanGenerated, map[string]any{"plan": state.Message})
+
+	planText := formatPlanMessage(state.Message)
+	blocks := formatPlanBlocks(state.Message, jobID)
+	return OrchestratorResult{
+		IsJob:      true,
+		Text:       planText,
+		PlanBlocks: blocks,
+		PlanText:   planText,
+		JobID:      jobID,
+	}, nil
 }
 
 // executeImplementation implements the approved plan and creates a PR.
@@ -376,6 +390,66 @@ func extractPlanFromThread(messages []Message) string {
 // formatPlanMessage wraps a plan in the standard format for Slack.
 func formatPlanMessage(plan string) string {
 	return fmt.Sprintf("%s\n\n%s\n\n_Reply with your feedback, or say \"go\" to approve and start implementation._", planMarker, plan)
+}
+
+// formatPlanBlocks returns Block Kit blocks for a plan message with an Approve button.
+func formatPlanBlocks(plan, jobID string) []slack.Block {
+	// Slack section blocks have a 3000 char limit for text.
+	displayPlan := plan
+	if len(displayPlan) > 2800 {
+		displayPlan = displayPlan[:2800] + "\n..."
+	}
+
+	planSection := slack.NewSectionBlock(
+		slack.NewTextBlockObject(slack.MarkdownType, fmt.Sprintf("%s\n\n%s", planMarker, displayPlan), false, false),
+		nil, nil,
+	)
+
+	divider := slack.NewDividerBlock()
+
+	ctxBlock := slack.NewContextBlock("",
+		slack.NewTextBlockObject(slack.MarkdownType, "Reply with your feedback, or click *Approve* to start implementation.", false, false),
+	)
+
+	approveBtn := slack.NewButtonBlockElement("approve_plan", jobID,
+		slack.NewTextBlockObject(slack.PlainTextType, "Approve", false, false),
+	)
+	approveBtn.Style = slack.StylePrimary
+
+	actionsBlock := slack.NewActionBlock("plan_actions", approveBtn)
+
+	return []slack.Block{planSection, divider, ctxBlock, actionsBlock}
+}
+
+// formatApprovedPlanBlocks returns Block Kit blocks for an already-approved plan (no button).
+func formatApprovedPlanBlocks(plan, approvedBy string) []slack.Block {
+	displayPlan := plan
+	if len(displayPlan) > 2800 {
+		displayPlan = displayPlan[:2800] + "\n..."
+	}
+
+	planSection := slack.NewSectionBlock(
+		slack.NewTextBlockObject(slack.MarkdownType, fmt.Sprintf("%s\n\n%s", planMarker, displayPlan), false, false),
+		nil, nil,
+	)
+
+	divider := slack.NewDividerBlock()
+
+	ctxBlock := slack.NewContextBlock("",
+		slack.NewTextBlockObject(slack.MarkdownType, fmt.Sprintf("Approved by %s", approvedBy), false, false),
+	)
+
+	return []slack.Block{planSection, divider, ctxBlock}
+}
+
+// ImplementApprovedPlan parses intent from the thread, forces PlanApproved=true, and runs implementation.
+func (o *Orchestrator) ImplementApprovedPlan(ctx context.Context, messages []Message) (OrchestratorResult, error) {
+	intent, err := ParseIntent(ctx, o.anthropicKey, messages)
+	if err != nil {
+		return OrchestratorResult{}, fmt.Errorf("parse intent: %w", err)
+	}
+	intent.PlanApproved = true
+	return o.executeImplementation(ctx, messages, intent)
 }
 
 // taskBranchName generates a git-safe branch name from a task description.

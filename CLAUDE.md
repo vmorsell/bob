@@ -27,8 +27,9 @@ A named `workspace` volume is mounted at `/workspace` for persistent repo clones
 
 Go code is organized by concern:
 
-- `main.go` — HTTP mux, routes mounted at `/webhooks/<source>` and `/jobs/`, `/api/jobs`, `/events`; wires up dependencies
-- `slack.go` — Slack handler: signature verification, `url_verification` challenge, `app_mention` event handling with thread context
+- `main.go` — HTTP mux, routes mounted at `/webhooks/<source>`, `/webhooks/slack/interactions`, `/jobs/`, `/api/jobs`, `/events`; wires up dependencies; `POST /api/jobs/{id}/approve` endpoint for web UI approval
+- `slack.go` — Slack event handler: signature verification, `url_verification` challenge, `app_mention` event handling with thread context and Block Kit plan messages; `NewSlackInteractionHandler` for Slack button click callbacks
+- `approve.go` — `Approver`: shared approval path for both Slack button and web UI; atomic double-approval guard via `Hub.TryStartImplementation`
 - `llm.go` — `Message`/`Role` types (used by intent parser and slack thread parsing)
 - `intent.go` — `ParseIntent`: single Claude Haiku call that extracts `{Repo, Task, Question, PlanApproved, PlanFeedback}` from a Slack conversation; detects plan state via the `📋 *Plan*` marker
 - `orchestrator.go` — `Orchestrator`: three-path dispatch (planning / plan-feedback / implementation); calls `ParseIntent`, then routes to `executePlanning` or `executeImplementation`
@@ -36,7 +37,7 @@ Go code is organized by concern:
 - `claudecode.go` — `runClaudeCode` (shared CLI logic), `GeneratePlan` (prompt-enforced read-only), `ImplementChanges` (implementation mode); `claudeStreamParser` for streaming JSON events
 - `util.go` — `truncate` helper
 - `notify.go` — `SlackNotifier` for posting mid-execution messages; context keys for channel, threadTS, jobID, and hub
-- `monitor.go` — `Hub` (SSE fan-out + JSONL persistence), event types, `streamingWriter`, REST handlers (`/api/jobs`, `/api/jobs/{id}`), SSE handler (`/events`), and dark-terminal web UI served at `/` and `/jobs/{id}`
+- `monitor.go` — `Hub` (SSE fan-out + JSONL persistence), event types, `streamingWriter`, REST handlers (`/api/jobs`, `/api/jobs/{id}`), SSE handler (`/events`), dark-terminal web UI, and approval state tracking (`implementingJobs`, `planMsgTS`, `jobMeta` sync.Maps)
 
 ### Orchestration pattern (plan-first workflow)
 
@@ -61,6 +62,20 @@ Every Slack mention triggers one Claude Haiku call (`ParseIntent`) that returns 
 **Unified job per thread:** A single monitoring job spans the entire planning → feedback → implementation lifecycle within a Slack thread. `Hub.threadJobs` maps `channel:threadTS` to the active job ID. The job is created on first mention and only closed when a PR is created, an error occurs, or the thread starts a fresh request. This means one monitoring link per thread — the user sees planning events and implementation events in the same timeline.
 
 Plan state detection: Haiku detects the `📋 *Plan*` marker in assistant messages. If present and the user's latest message is an approval ("go", "lgtm", etc.), `PlanApproved` is set. If the user provides feedback, `PlanFeedback` is set. Thread-as-state handles unlimited revision rounds.
+
+### Interactive plan approval
+
+Plans are posted as Slack Block Kit messages with an "Approve" button. Two approval paths converge on a shared `Approver`:
+
+**Slack button:** `/webhooks/slack/interactions` receives `block_actions` callbacks. The handler verifies the Slack signature, extracts the job ID from the button value, returns 200 immediately, then calls `approver.Approve` in a goroutine.
+
+**Web UI:** `POST /api/jobs/{id}/approve` triggers `approver.Approve` using stored `JobMeta` (channel + threadTS) for the Slack thread coordinates.
+
+**Text-based:** Typing "go" / "lgtm" in the thread still works — `ParseIntent` detects `PlanApproved` and the orchestrator calls `executeImplementation` directly.
+
+`Approver.Approve` flow: atomic guard via `Hub.TryStartImplementation` (prevents double-approval) → update plan message to remove button ("Approved by ...") → post "Implementing..." message → fetch thread → `orchestrator.ImplementApprovedPlan` → post result (PR URL or error). On error, `ClearImplementation` allows retry.
+
+When feedback triggers a revised plan, `handleMention` updates the old plan message (removes its button, labels it "superseded by updated plan") before posting the new plan with a fresh button.
 
 **Why prompt-based planning:** `--permission-mode plan` doesn't actually restrict tools when combined with `--dangerously-skip-permissions` (the skip flag overrides plan mode). So planning uses prompt instructions to enforce read-only behavior instead.
 

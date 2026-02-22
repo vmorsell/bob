@@ -17,16 +17,8 @@ import (
 
 var mentionRe = regexp.MustCompile(`<@[A-Z0-9]+>\s*`)
 
-func NewSlackHandler(client *slack.Client, signingSecret string, orch *Orchestrator, hub *Hub, maxPerMinute float64) http.Handler {
+func NewSlackHandler(client *slack.Client, signingSecret string, orch *Orchestrator, hub *Hub, botUserID string, maxPerMinute float64) http.Handler {
 	limiter := rate.NewLimiter(rate.Limit(maxPerMinute/60), int(maxPerMinute/60)+1)
-
-	// Get our own bot user ID so we can identify our messages in threads.
-	authResp, err := client.AuthTest()
-	if err != nil {
-		log.Fatalf("slack auth test failed: %v", err)
-	}
-	botUserID := authResp.UserID
-	log.Printf("Bot user ID: %s", botUserID)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -150,11 +142,59 @@ func handleMention(client *slack.Client, orch *Orchestrator, botUserID string, h
 
 	removeReaction(client, ev.Channel, ev.TimeStamp)
 
-	var text string
 	if err != nil {
 		log.Printf("orchestrator error: %v", err)
-		text = fmt.Sprintf("<@%s> Sorry, I hit an error trying to respond. Please try again.", ev.User)
-	} else if result.IsJob && result.PRURL != "" {
+		text := fmt.Sprintf("<@%s> Sorry, I hit an error trying to respond. Please try again.", ev.User)
+		_, _, err = client.PostMessage(ev.Channel,
+			slack.MsgOptionText(text, false),
+			slack.MsgOptionTS(threadTS),
+		)
+		if err != nil {
+			log.Printf("failed to post message: %v", err)
+		}
+		return
+	}
+
+	// Plan with Block Kit blocks: post with blocks + fallback text.
+	if len(result.PlanBlocks) > 0 {
+		// If there's a previous plan message for this job, remove its button.
+		if oldTS := hub.GetPlanMsgTS(result.JobID); oldTS != "" {
+			oldMsgs, _, _, err := client.GetConversationReplies(&slack.GetConversationRepliesParameters{
+				ChannelID: ev.Channel,
+				Timestamp: oldTS,
+				Inclusive: true,
+				Limit:     1,
+			})
+			if err == nil && len(oldMsgs) > 0 {
+				oldPlan := extractPlanFromThread([]Message{{Role: RoleAssistant, Content: oldMsgs[0].Text}})
+				updatedBlocks := formatApprovedPlanBlocks(oldPlan, "superseded by updated plan")
+				_, _, _, err = client.UpdateMessage(ev.Channel, oldTS,
+					slack.MsgOptionText(oldMsgs[0].Text, false),
+					slack.MsgOptionBlocks(updatedBlocks...),
+				)
+				if err != nil {
+					log.Printf("failed to update old plan message: %v", err)
+				}
+			}
+		}
+
+		planText := fmt.Sprintf("<@%s> %s", ev.User, result.PlanText)
+		_, msgTS, err := client.PostMessage(ev.Channel,
+			slack.MsgOptionText(planText, false),
+			slack.MsgOptionBlocks(result.PlanBlocks...),
+			slack.MsgOptionTS(threadTS),
+		)
+		if err != nil {
+			log.Printf("failed to post plan message: %v", err)
+		} else {
+			hub.SetPlanMsgTS(result.JobID, msgTS)
+		}
+		return
+	}
+
+	// Standard text reply.
+	var text string
+	if result.IsJob && result.PRURL != "" {
 		text = fmt.Sprintf("<@%s> Done! %s", ev.User, result.PRURL)
 	} else if result.IsJob && result.Text != "" {
 		text = fmt.Sprintf("<@%s> %s", ev.User, result.Text)
@@ -208,4 +248,81 @@ func threadToMessages(replies []slack.Message, botUserID string) []Message {
 
 func stripMention(text string) string {
 	return strings.TrimSpace(mentionRe.ReplaceAllString(text, ""))
+}
+
+// NewSlackInteractionHandler handles Slack interactive component callbacks (button clicks).
+func NewSlackInteractionHandler(client *slack.Client, signingSecret string, approver *Approver) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "failed to read body", http.StatusBadRequest)
+			return
+		}
+
+		// Verify Slack request signature.
+		sv, err := slack.NewSecretsVerifier(r.Header, signingSecret)
+		if err != nil {
+			http.Error(w, "failed to create verifier", http.StatusUnauthorized)
+			return
+		}
+		if _, err := sv.Write(body); err != nil {
+			http.Error(w, "failed to write body to verifier", http.StatusUnauthorized)
+			return
+		}
+		if err := sv.Ensure(); err != nil {
+			http.Error(w, "invalid signature", http.StatusUnauthorized)
+			return
+		}
+
+		// Parse the interaction payload.
+		r.Body = io.NopCloser(strings.NewReader(string(body)))
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "failed to parse form", http.StatusBadRequest)
+			return
+		}
+
+		payloadStr := r.FormValue("payload")
+		if payloadStr == "" {
+			http.Error(w, "missing payload", http.StatusBadRequest)
+			return
+		}
+
+		var callback slack.InteractionCallback
+		if err := json.Unmarshal([]byte(payloadStr), &callback); err != nil {
+			http.Error(w, "failed to parse payload", http.StatusBadRequest)
+			return
+		}
+
+		if callback.Type != slack.InteractionTypeBlockActions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		for _, action := range callback.ActionCallback.BlockActions {
+			if action.ActionID != "approve_plan" {
+				continue
+			}
+
+			jobID := action.Value
+			channel := callback.Channel.ID
+			threadTS := callback.Message.ThreadTimestamp
+			if threadTS == "" {
+				threadTS = callback.Message.Timestamp
+			}
+			approvedBy := callback.User.Name
+
+			// Return 200 immediately — Slack requires <3s response.
+			w.WriteHeader(http.StatusOK)
+
+			go approver.Approve(context.Background(), jobID, channel, threadTS, approvedBy)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+	})
 }
