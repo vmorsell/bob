@@ -556,7 +556,7 @@
       .cc-text {
         padding: 3px 18px;
         font-size: 14px;
-        color: var(--text-secondary);
+        color: var(--text-primary);
         line-height: 1.6;
       }
       .cc-text + .cc-text {
@@ -705,6 +705,95 @@
         padding-left: 0;
       }
 
+      /* ── Collapsible cc rows (thinking / read-group / agents) ── */
+      .cc-thinking,
+      .cc-group,
+      .cc-agents {
+        margin: 4px 18px;
+        font-size: 13px;
+        font-family: "SF Mono", ui-monospace, monospace;
+      }
+      .cc-thinking summary,
+      .cc-group summary,
+      .cc-agents summary {
+        cursor: pointer;
+        color: var(--text-secondary);
+        padding: 2px 0;
+        list-style: none;
+        user-select: none;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .cc-thinking summary::-webkit-details-marker,
+      .cc-group summary::-webkit-details-marker,
+      .cc-agents summary::-webkit-details-marker { display: none; }
+      .cc-thinking summary:hover,
+      .cc-group summary:hover,
+      .cc-agents summary:hover { color: var(--text-primary); }
+      /* Rotating expand arrow */
+      .cc-thinking summary::before,
+      .cc-group summary::before,
+      .cc-agents summary::before {
+        content: "›";
+        font-size: 15px;
+        color: var(--text-tertiary);
+        transition: transform 0.15s ease;
+        flex-shrink: 0;
+      }
+      details.cc-thinking[open] summary::before,
+      details.cc-group[open] summary::before,
+      details.cc-agents[open] summary::before {
+        transform: rotate(90deg);
+      }
+
+      .cc-thinking-body {
+        margin-top: 6px;
+        padding: 8px 12px;
+        background: var(--surface-inset);
+        border-radius: var(--radius-sm);
+        font-size: 12px;
+        color: var(--text-secondary);
+        white-space: pre-wrap;
+        overflow-wrap: break-word;
+        border: 1px solid var(--border);
+        max-height: 300px;
+        overflow-y: auto;
+      }
+      .cc-agents-body {
+        margin-top: 4px;
+        padding: 6px 12px;
+        background: var(--surface-inset);
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+      }
+      .cc-agents-item {
+        padding: 3px 0;
+        font-size: 13px;
+        color: var(--text-secondary);
+      }
+      .cc-group ul {
+        margin-top: 4px;
+        padding: 6px 12px;
+        background: var(--surface-inset);
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+        list-style: none;
+      }
+      .cc-group li {
+        padding: 2px 0;
+        font-size: 12px;
+        color: var(--text-tertiary);
+      }
+
+      /* ── Tool error ── */
+      .cc-error {
+        padding: 3px 18px;
+        font-size: 13px;
+        font-family: "SF Mono", ui-monospace, monospace;
+        color: var(--red);
+      }
+
       /* ── Scrollbar ── */
       ::-webkit-scrollbar {
         width: 6px;
@@ -837,6 +926,8 @@
         var ccIdx = -1;
         var ccLabel = "Claude Code";
         var jobCostUSD = 0;
+        var pendingReads = [];        // buffer for consecutive Read tool calls
+        var pendingThinkingEls = [];  // [{el, ts}] waiting for duration update
 
         function initJob(id) {
           document.title = "Job " + id.slice(0, 8) + " \u2013 Bob";
@@ -909,8 +1000,47 @@
           }
         }
 
+        function flushReads(content) {
+          if (!pendingReads.length) return;
+          var item;
+          if (pendingReads.length === 1) {
+            item = makeToolItem(pendingReads[0]);
+          } else {
+            var el = document.createElement("details");
+            el.className = "cc-group";
+            var paths = pendingReads.map(function(rd) {
+              var inp = {};
+              try { inp = JSON.parse(rd.tool_input || "{}"); } catch(e) {}
+              var fp = inp.file_path || inp.path || "";
+              fp = fp.replace(/^\/workspace\/[^\/]+\//, "");
+              return "<li>" + h(fp || rd.tool_input || "") + "</li>";
+            }).join("");
+            el.innerHTML = "<summary>Read " + pendingReads.length + " files</summary><ul>" + paths + "</ul>";
+            item = el;
+          }
+          if (item) content.appendChild(item);
+          pendingReads = [];
+        }
+
+        function updateThinkingDurations() {
+          if (!pendingThinkingEls.length) return;
+          var now = Date.now();
+          pendingThinkingEls.forEach(function(entry) {
+            var span = entry.el.querySelector(".cc-thinking-dur");
+            if (span) span.textContent = fmtDuration(now - entry.ts);
+          });
+          pendingThinkingEls = [];
+        }
+
         function addEvt(ev) {
           var d = ev.data || {};
+
+          // Flush pending Read buffer and thinking durations on non-cc-line events.
+          if (ev.type !== "claude_code_line") {
+            var content = document.getElementById("cc-content-" + ccIdx);
+            if (content) flushReads(content);
+            updateThinkingDurations();
+          }
 
           if (ev.type === "job_started") {
             taskText = d.task || "";
@@ -937,11 +1067,16 @@
           if (ev.type === "claude_code_line") {
             var content = document.getElementById("cc-content-" + ccIdx);
             if (content) {
-              var item = makeCCItem(d);
-              if (item) {
-                content.appendChild(item);
-                content.scrollTop = content.scrollHeight;
-                if (autoScroll) window.scrollTo(0, document.body.scrollHeight);
+              updateThinkingDurations();
+              if (d.tool_name === "Read") {
+                pendingReads.push(d);
+              } else {
+                flushReads(content);
+                var item = makeCCItem(d);
+                if (item) {
+                  content.appendChild(item);
+                  if (autoScroll) window.scrollTo(0, document.body.scrollHeight);
+                }
               }
             }
             return;
@@ -1005,7 +1140,7 @@
           ) {
             var sec = document.createElement("div");
             sec.className =
-              "cc-section" +
+              "cc-section expanded" +
               (d.tool_name === "run_tests" ? " cc-section-terminal" : "");
             sec.innerHTML =
               '<div class="cc-label">' +
@@ -1027,6 +1162,40 @@
         // ── Claude Code item rendering ────────────────────────────────────────────────
 
         function makeCCItem(d) {
+          // Thinking block
+          if (d.thinking !== undefined) {
+            var el = document.createElement("details");
+            el.className = "cc-thinking";
+            el.innerHTML =
+              '<summary>Thought for <span class="cc-thinking-dur">\u2026</span></summary>' +
+              '<pre class="cc-thinking-body">' + h(d.thinking) + "</pre>";
+            pendingThinkingEls.push({ el: el, ts: d.thinking_ts || Date.now() });
+            return el;
+          }
+
+          // Tool error
+          if (d.tool_error !== undefined) {
+            var el = document.createElement("div");
+            el.className = "cc-error";
+            el.innerHTML = "⚠ <span>" + h(d.tool_error) + "</span>";
+            return el;
+          }
+
+          // Sub-agent completions
+          if (d.agents_finished) {
+            var agents = d.agents || [];
+            var el = document.createElement("details");
+            el.className = "cc-agents";
+            var items = agents.map(function(a) {
+              return '<div class="cc-agents-item">' + h(a.description || "") + "</div>";
+            }).join("");
+            el.innerHTML =
+              "<summary>" + d.agents_finished + " sub-agent" +
+              (d.agents_finished !== 1 ? "s" : "") + " finished</summary>" +
+              '<div class="cc-agents-body">' + items + "</div>";
+            return el;
+          }
+
           if (d.tool_name) return makeToolItem(d);
           var txt = (d.text || "").trimEnd();
           if (!txt) return null;
@@ -1100,7 +1269,7 @@
           var el = document.createElement("div");
           el.className = "cc-row";
           el.innerHTML =
-            '<span class="cc-arrow">›</span>' +
+            '<span class="cc-arrow">\u00b7</span>' +
             '<span class="cc-nm">' +
             h(name) +
             "</span>" +
@@ -1158,7 +1327,7 @@
           el.className = "cc-diff";
           el.innerHTML =
             '<div class="cc-diff-hdr">' +
-            '<span class="cc-arrow">›</span>' +
+            '<span class="cc-arrow">\u00b7</span>' +
             '<span class="cc-nm">' +
             h(toolName) +
             "</span>" +

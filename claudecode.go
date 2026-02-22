@@ -111,18 +111,26 @@ func ImplementChanges(ctx context.Context, claudeCodeToken string, notifier *Sla
 // Claude Code CLI, emitting real-time hub events for each reasoning step and
 // tool call, while also collecting the final result text and terminal state.
 type claudeStreamParser struct {
-	hub           *Hub
-	jobID         string
-	notifier      *SlackNotifier
-	ctx           context.Context
-	lineBuf       []byte
-	raw           bytes.Buffer // full raw bytes, for error messages
-	result        string       // text from the final "result" event
-	terminalState TerminalState
+	hub               *Hub
+	jobID             string
+	notifier          *SlackNotifier
+	ctx               context.Context
+	lineBuf           []byte
+	raw               bytes.Buffer // full raw bytes, for error messages
+	result            string       // text from the final "result" event
+	terminalState     TerminalState
+	pendingTaskDescs  map[string]string // tool_use_id → Task description
+	thinkingStartedAt time.Time        // wall-clock when last thinking block was seen
 }
 
 func newClaudeStreamParser(hub *Hub, jobID string, notifier *SlackNotifier, ctx context.Context) *claudeStreamParser {
-	return &claudeStreamParser{hub: hub, jobID: jobID, notifier: notifier, ctx: ctx}
+	return &claudeStreamParser{
+		hub:              hub,
+		jobID:            jobID,
+		notifier:         notifier,
+		ctx:              ctx,
+		pendingTaskDescs: make(map[string]string),
+	}
 }
 
 func (p *claudeStreamParser) Write(data []byte) (int, error) {
@@ -147,9 +155,10 @@ func (p *claudeStreamParser) output() string {
 
 // claudeStreamEvent covers the shapes we care about from --output-format stream-json.
 type claudeStreamEvent struct {
-	Type    string `json:"type"`
-	Subtype string `json:"subtype"`
-	Message struct {
+	Type            string `json:"type"`
+	Subtype         string `json:"subtype"`
+	ParentToolUseID string `json:"parent_tool_use_id"`
+	Message         struct {
 		Role    string            `json:"role"`
 		Content []json.RawMessage `json:"content"`
 	} `json:"message"`
@@ -158,10 +167,20 @@ type claudeStreamEvent struct {
 }
 
 type claudeContentBlock struct {
-	Type  string          `json:"type"`
-	Text  string          `json:"text"`
-	Name  string          `json:"name"`
-	Input json.RawMessage `json:"input"`
+	Type     string          `json:"type"`
+	Text     string          `json:"text"`
+	Thinking string          `json:"thinking"` // populated for type=thinking
+	Name     string          `json:"name"`
+	ID       string          `json:"id"`       // populated for type=tool_use
+	Input    json.RawMessage `json:"input"`
+}
+
+// claudeToolResultBlock represents a tool_result content block in a "user" event.
+type claudeToolResultBlock struct {
+	Type      string `json:"type"`
+	ToolUseID string `json:"tool_use_id"`
+	Content   string `json:"content"`
+	IsError   bool   `json:"is_error"`
 }
 
 func (p *claudeStreamParser) processLine(line string) {
@@ -198,7 +217,8 @@ func (p *claudeStreamParser) processLine(line string) {
 					filteredLines = append(filteredLines, textLine)
 				}
 				filteredText := strings.Join(filteredLines, "\n")
-				if p.notifier != nil && strings.TrimSpace(filteredText) != "" {
+				// Only notify Slack for the main agent (not sub-agents).
+				if p.notifier != nil && evt.ParentToolUseID == "" && strings.TrimSpace(filteredText) != "" {
 					p.notifier.Notify(p.ctx, filteredText)
 				}
 				for _, textLine := range filteredLines {
@@ -206,12 +226,56 @@ func (p *claudeStreamParser) processLine(line string) {
 						p.emit(textLine)
 					}
 				}
+			case "thinking":
+				p.thinkingStartedAt = time.Now()
+				if p.hub != nil && p.jobID != "" {
+					p.hub.Emit(p.jobID, EventClaudeCodeLine, map[string]any{
+						"thinking":    block.Thinking,
+						"thinking_ts": time.Now().UnixMilli(),
+					})
+				}
 			case "tool_use":
+				// Track Task sub-agent IDs for later aggregation.
+				if block.Name == "Task" && block.ID != "" {
+					var input struct {
+						Description string `json:"description"`
+					}
+					if err := json.Unmarshal(block.Input, &input); err == nil && input.Description != "" {
+						p.pendingTaskDescs[block.ID] = input.Description
+					}
+				}
 				p.emitTool(block.Name, block.Input)
 			}
 		}
 	case "user":
-		// tool results — skip to keep output clean
+		var completed []map[string]any
+		for _, raw := range evt.Message.Content {
+			var block claudeToolResultBlock
+			if err := json.Unmarshal(raw, &block); err != nil {
+				continue
+			}
+			if block.Type != "tool_result" {
+				continue
+			}
+			if block.IsError {
+				if p.hub != nil && p.jobID != "" {
+					p.hub.Emit(p.jobID, EventClaudeCodeLine, map[string]any{
+						"tool_error": truncate(block.Content, 300),
+					})
+				}
+				continue
+			}
+			if desc, ok := p.pendingTaskDescs[block.ToolUseID]; ok {
+				completed = append(completed, map[string]any{"description": desc})
+				delete(p.pendingTaskDescs, block.ToolUseID)
+			}
+		}
+		if len(completed) > 0 && p.hub != nil && p.jobID != "" {
+			p.hub.Emit(p.jobID, EventClaudeCodeLine, map[string]any{
+				"agents_finished": len(completed),
+				"agents":          completed,
+			})
+		}
 	case "result":
 		if evt.Subtype == "error" && evt.Error != "" {
 			p.result = evt.Error
@@ -233,6 +297,12 @@ func (p *claudeStreamParser) processLine(line string) {
 				p.emit(textLine)
 			}
 		}
+		// Notify Slack with the final summary.
+		if p.notifier != nil && strings.TrimSpace(p.result) != "" {
+			p.notifier.Notify(p.ctx, p.result)
+		}
+	case "rate_limit_event":
+		// no-op
 	}
 }
 
