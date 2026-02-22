@@ -127,7 +127,10 @@ func GeneratePlan(ctx context.Context, claudeCodeToken string, notifier *SlackNo
 	sb.WriteString(task)
 	sb.WriteString("\n\n")
 	sb.WriteString("Explore the codebase thoroughly. Consider existing architecture, patterns, and ")
-	sb.WriteString("conventions. Produce a detailed, step-by-step implementation plan.")
+	sb.WriteString("conventions.\n\n")
+	sb.WriteString("Your final response MUST be the complete, detailed, step-by-step implementation plan. ")
+	sb.WriteString("Include specific files to modify, what changes to make in each, and the order of ")
+	sb.WriteString("operations. Do not include exploration commentary — only the plan itself.")
 	sb.WriteString(terminalStatePromptSuffix)
 
 	sp, err := runClaudeCode(ctx, claudeCodeToken, notifier, repoName, sb.String(), true)
@@ -135,11 +138,33 @@ func GeneratePlan(ctx context.Context, claudeCodeToken string, notifier *SlackNo
 		return TerminalState{}, err
 	}
 
+	// Use terminal state for status detection only. For completed plans, prefer
+	// the full result text (the actual plan) over the terminal state message
+	// (which is just a brief summary per the terminal state protocol).
 	if sp.terminalState.Status != "" {
+		if sp.terminalState.Status != "completed" {
+			return sp.terminalState, nil
+		}
+		planText := filterTerminalStateJSON(sp.output())
+		if strings.TrimSpace(planText) != "" {
+			return TerminalState{Status: "completed", Message: planText}, nil
+		}
+		// Fall back to terminal state message if result text is somehow empty.
 		return sp.terminalState, nil
 	}
 
 	return TerminalState{Status: "completed", Message: sp.output()}, nil
+}
+
+// filterTerminalStateJSON removes terminal state JSON lines from text.
+func filterTerminalStateJSON(text string) string {
+	var lines []string
+	for _, line := range strings.Split(text, "\n") {
+		if _, ok := tryParseTerminalState(line); !ok {
+			lines = append(lines, line)
+		}
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 // ImplementChanges runs Claude Code CLI in the given repo to implement the task.

@@ -212,6 +212,11 @@ func (o *Orchestrator) executePlanning(ctx context.Context, messages []Message, 
 func (o *Orchestrator) executeImplementation(ctx context.Context, messages []Message, intent IntentResult) (OrchestratorResult, error) {
 	// Extract the approved plan from the thread.
 	plan := extractPlanFromThread(messages)
+	if plan == "" {
+		log.Printf("orchestrator: WARNING: no plan found in thread (%d messages), implementation will use task description only", len(messages))
+	} else {
+		log.Printf("orchestrator: extracted plan from thread (%d chars)", len(plan))
+	}
 
 	// Verify repo exists via GitHub API.
 	if _, err := FindRepo(ctx, o.githubToken, o.githubOwner, intent.Repo); err != nil {
