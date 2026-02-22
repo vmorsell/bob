@@ -963,7 +963,13 @@
           // Flush pending Read buffer and thinking durations on non-cc-line events.
           if (ev.type !== "claude_code_line") {
             var content = document.getElementById("cc-content-" + ccIdx);
-            if (content) flushReads(content);
+            if (content) {
+              flushReads(content);
+              var isExpanded = content.parentElement && content.parentElement.classList.contains("expanded");
+              if (!isExpanded && (!content._userScrolled || content._atBottom)) {
+                content.scrollTop = content.scrollHeight;
+              }
+            }
             updateThinkingDurations();
           }
 
@@ -1019,6 +1025,11 @@
                 var item = makeCCItem(d);
                 if (item) {
                   content.appendChild(item);
+                  // Auto-scroll the box if user hasn't scrolled or is at the bottom.
+                  var isExpanded = content.parentElement && content.parentElement.classList.contains("expanded");
+                  if (!isExpanded && (!content._userScrolled || content._atBottom)) {
+                    content.scrollTop = content.scrollHeight;
+                  }
                   if (autoScroll) window.scrollTo(0, document.body.scrollHeight);
                 }
               }
@@ -1044,7 +1055,7 @@
               ccLabel = d.tool_name === "run_tests" ? "Run Tests" : d.tool_name === "generate_plan" ? "Planning" : "Claude Code";
 
               var sec = document.createElement("div");
-              sec.className = "cc-section expanded" + (d.tool_name === "run_tests" ? " cc-section-terminal" : "");
+              sec.className = "cc-section" + (d.tool_name === "run_tests" ? " cc-section-terminal" : "");
               sec.id = "cc-sec-" + ccIdx;
               sec.innerHTML =
                 '<div class="cc-label">' +
@@ -1053,7 +1064,21 @@
                 '<div class="cc-content" id="cc-content-' + ccIdx + '"></div>';
               sec.querySelector(".cc-label").addEventListener("click", function () {
                 sec.classList.toggle("expanded");
+                if (!sec.classList.contains("expanded")) {
+                  var cc = sec.querySelector(".cc-content");
+                  if (cc) cc.scrollTop = cc.scrollHeight;
+                }
               });
+
+              // Track per-box scroll state for auto-scroll in collapsed mode.
+              var ccContent = sec.querySelector(".cc-content");
+              ccContent._userScrolled = false;
+              ccContent.addEventListener("scroll", function () {
+                ccContent._userScrolled = true;
+                var atBottom = ccContent.scrollHeight - ccContent.clientHeight - ccContent.scrollTop < 4;
+                ccContent._atBottom = atBottom;
+              });
+
               list.appendChild(sec);
             } else {
               // Regular orchestrator step: show as a step row with spinner.
