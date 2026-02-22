@@ -381,138 +381,108 @@
         animation: pulse 1.5s ease-in-out infinite;
       }
 
-      /* ── Event list ── */
-      .ev-list {
+      /* ── Step timeline ── */
+      .step-list {
         display: flex;
         flex-direction: column;
-        gap: 6px;
+        gap: 2px;
       }
 
-      .ev {
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        background: var(--surface);
-        box-shadow: var(--shadow-sm);
-        overflow: hidden;
-      }
-
-      .ev-row {
+      .step-line {
         display: flex;
         align-items: center;
-        gap: 12px;
-        padding: 12px 18px;
-        cursor: pointer;
-        transition: background 0.1s ease;
-        min-height: 44px;
-      }
-      .ev-row:hover {
-        background: var(--surface-hover);
-      }
-      .ev-row.static {
-        cursor: default;
-      }
-      .ev-row.static:hover {
-        background: transparent;
+        gap: 10px;
+        padding: 6px 2px;
+        font-family: "SF Mono", ui-monospace, monospace;
+        font-size: 13px;
+        line-height: 1.5;
       }
 
-      /* ── Tag ── */
-      .tag {
-        display: inline-flex;
-        align-items: center;
-        padding: 2px 8px;
-        border-radius: 5px;
-        font-size: 11px;
-        font-weight: 600;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        white-space: nowrap;
+      .step-dot {
+        width: 14px;
+        height: 14px;
         flex-shrink: 0;
-        width: 80px;
+        display: flex;
+        align-items: center;
         justify-content: center;
-      }
-      .tag-job {
-        background: var(--accent-subtle);
-        color: var(--accent);
-      }
-      .tag-done {
-        background: var(--green-subtle);
-        color: var(--green);
-      }
-      .tag-err {
-        background: var(--red-subtle);
-        color: var(--red);
-      }
-      .tag-llm {
-        background: var(--purple-subtle);
-        color: var(--purple);
-      }
-      .tag-tool {
-        background: var(--orange-subtle);
-        color: var(--orange);
-      }
-      .tag-slack {
-        background: var(--cyan-subtle);
-        color: var(--cyan);
+        font-size: 12px;
       }
 
-      .ev-name {
-        font-size: 14px;
+      .step-pulse {
+        display: block;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 0 2px var(--accent-subtle);
+        animation: pulse 1.5s ease-in-out infinite;
+      }
+
+      .step-nm {
+        font-weight: 500;
         color: var(--text-secondary);
+        white-space: nowrap;
+      }
+
+      .step-desc {
+        color: var(--text-tertiary);
+        flex: 1;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        flex: 1;
       }
-      .ev-name strong {
-        color: var(--text-primary);
-        font-weight: 500;
+
+      .step-desc a {
+        color: var(--accent);
       }
-      .ev-ok {
+
+      .step-dur {
+        font-size: 12px;
+        color: var(--text-tertiary);
+        white-space: nowrap;
+        padding-left: 12px;
+      }
+
+      /* ── CC section spacing within step list ── */
+      .step-list .cc-section {
+        margin: 6px 0;
+      }
+
+      /* ── Job footer ── */
+      .job-footer {
+        display: flex;
+        align-items: baseline;
+        flex-wrap: wrap;
+        gap: 6px 10px;
+        padding: 14px 2px 0;
+        border-top: 1px solid var(--border);
+        margin-top: 16px;
+        font-family: "SF Mono", ui-monospace, monospace;
+        font-size: 13px;
+      }
+
+      .job-footer-ok {
         color: var(--green);
       }
-      .ev-err {
+
+      .job-footer-err {
         color: var(--red);
       }
 
-      .dur {
-        font-size: 12px;
-        color: var(--text-tertiary);
-        font-family: "SF Mono", ui-monospace, monospace;
-        white-space: nowrap;
-      }
-
-      .ev-time {
-        font-size: 12px;
-        color: var(--text-tertiary);
-        font-variant-numeric: tabular-nums;
-        white-space: nowrap;
-      }
-
-      .ev-caret {
-        color: var(--text-tertiary);
-        font-size: 14px;
+      .job-footer-icon {
         flex-shrink: 0;
-        transition: transform 0.2s ease;
-      }
-      .ev.open .ev-caret {
-        transform: rotate(90deg);
+        font-size: 14px;
       }
 
-      /* ── Event body ── */
-      .ev-body {
-        border-top: 1px solid var(--border);
-        padding: 14px 18px;
-        font-family: "SF Mono", ui-monospace, monospace;
-        font-size: 13px;
-        line-height: 1.6;
+      .job-footer-msg {
+        flex: 1;
         color: var(--text-secondary);
-        white-space: pre-wrap;
-        overflow-wrap: break-word;
-        word-break: break-word;
-        background: var(--surface-inset);
       }
-      .ev.closed .ev-body {
-        display: none;
+
+      .job-footer-meta {
+        font-size: 12px;
+        color: var(--text-tertiary);
+        white-space: nowrap;
       }
 
       /* ── Claude Code output ── */
@@ -533,6 +503,19 @@
         letter-spacing: 0.06em;
         text-transform: uppercase;
         color: var(--text-tertiary);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .cc-label-status {
+        font-size: 11px;
+      }
+      .cc-label-dur {
+        font-size: 11px;
+        font-family: "SF Mono", ui-monospace, monospace;
+        font-weight: 400;
+        letter-spacing: 0;
+        text-transform: none;
       }
       .cc-content {
         padding: 10px 0;
@@ -926,6 +909,7 @@
         var ccIdx = -1;
         var ccLabel = "Claude Code";
         var jobCostUSD = 0;
+        var toolStepMap = {};         // toolIdx → DOM element for in-flight steps
         var pendingReads = [];        // buffer for consecutive Read tool calls
         var pendingThinkingEls = [];  // [{el, ts}] waiting for duration update
 
@@ -934,7 +918,7 @@
           app(
             '<div id="jhdr" class="job-hdr"><div class="job-hdr-title" style="color:var(--text-tertiary)">Loading&hellip;</div></div>' +
               '<div id="lbar" class="live-bar"><span class="live-pip"></span><span>Live</span></div>' +
-              '<div id="evlist" class="ev-list"></div>' +
+              '<div id="evlist" class="step-list"></div>' +
               '<div id="prfooter"></div>',
           );
 
@@ -1042,25 +1026,30 @@
             updateThinkingDurations();
           }
 
-          if (ev.type === "job_started") {
-            taskText = d.task || "";
-            slackURL = d.slack_thread_url || "";
-          }
+          // Accumulate cost.
           if (ev.type === "llm_response" && d.cost_usd !== undefined) {
             jobCostUSD += d.cost_usd;
           }
           if ((ev.type === "job_completed" || ev.type === "job_error") && d.total_cost_usd !== undefined) {
             jobCostUSD = d.total_cost_usd;
           }
-          if (
-            ev.type === "tool_completed" &&
-            d.tool_name === "create_pull_request" &&
-            !d.is_error
-          ) {
-            var mm = (d.result_preview || "").match(
-              /https:\/\/github\.com\/[^\s]+\/pull\/\d+/,
-            );
+
+          // Extract PR link from create_pull_request completion.
+          if (ev.type === "tool_completed" && d.tool_name === "create_pull_request" && !d.is_error) {
+            var mm = (d.result_preview || "").match(/https:\/\/github\.com\/[^\s]+\/pull\/\d+/);
             if (mm) prLink = mm[0];
+          }
+
+          // job_started: populate header vars only.
+          if (ev.type === "job_started") {
+            taskText = d.task || "";
+            slackURL = d.slack_thread_url || "";
+            return;
+          }
+
+          // Skip internal plumbing events — cost is already tracked above.
+          if (ev.type === "slack_notification" || ev.type === "llm_call" || ev.type === "llm_response") {
+            return;
           }
 
           // Claude Code output line — append to eagerly-created CC content block.
@@ -1082,81 +1071,157 @@
             return;
           }
 
-          // Track when implement_changes or run_tests starts; the cc-section
-          // is eagerly created right after the tool_started row below.
-          if (
-            ev.type === "tool_started" &&
-            (d.tool_name === "implement_changes" || d.tool_name === "run_tests")
-          ) {
-            ccIdx = toolIdx;
-            ccLabel = d.tool_name === "run_tests" ? "Test Output" : "Claude Code";
-          }
-          if (ev.type === "tool_completed") toolIdx++;
-
           var list = document.getElementById("evlist");
           if (!list) return;
 
-          var body = evBody(ev);
-          var hasBody = body !== "";
-          var tag = evTag(ev);
-          var name = evName(ev);
-          var durStr =
-            d.duration_ms !== undefined
-              ? '<span class="dur">' + d.duration_ms + "ms</span>"
-              : "";
+          // tool_started
+          if (ev.type === "tool_started") {
+            var isCCTool = d.tool_name === "implement_changes" || d.tool_name === "run_tests";
 
-          var el = document.createElement("div");
-          el.className = "ev closed";
-          var rowCls = "ev-row" + (hasBody ? "" : " static");
-          var click = hasBody ? ' onclick="tog(this)"' : "";
-          el.innerHTML =
-            '<div class="' +
-            rowCls +
-            '"' +
-            click +
-            ">" +
-            '<span class="tag ' +
-            tag.c +
-            '">' +
-            tag.t +
-            "</span>" +
-            '<span class="ev-name">' +
-            name +
-            "</span>" +
-            durStr +
-            '<span class="ev-time">' +
-            fmtTs(ev.timestamp) +
-            "</span>" +
-            (hasBody ? '<span class="ev-caret">&#8250;</span>' : "") +
-            "</div>" +
-            (hasBody ? '<div class="ev-body">' + body + "</div>" : "");
-          list.appendChild(el);
+            if (isCCTool) {
+              ccIdx = toolIdx;
+              ccLabel = d.tool_name === "run_tests" ? "Run Tests" : "Claude Code";
 
-          // Eagerly create cc-section right after the tool_started row so
-          // output lines always appear directly below the tool call.
-          if (
-            ev.type === "tool_started" &&
-            (d.tool_name === "implement_changes" || d.tool_name === "run_tests")
-          ) {
-            var sec = document.createElement("div");
-            sec.className =
-              "cc-section expanded" +
-              (d.tool_name === "run_tests" ? " cc-section-terminal" : "");
-            sec.innerHTML =
-              '<div class="cc-label">' +
-              h(ccLabel) +
-              "</div>" +
-              '<div class="cc-content" id="cc-content-' +
-              ccIdx +
-              '"></div>';
-            sec.querySelector(".cc-label").addEventListener(
-              "click",
-              function () {
+              var sec = document.createElement("div");
+              sec.className = "cc-section expanded" + (d.tool_name === "run_tests" ? " cc-section-terminal" : "");
+              sec.id = "cc-sec-" + ccIdx;
+              sec.innerHTML =
+                '<div class="cc-label">' +
+                h(ccLabel) +
+                '</div>' +
+                '<div class="cc-content" id="cc-content-' + ccIdx + '"></div>';
+              sec.querySelector(".cc-label").addEventListener("click", function () {
                 sec.classList.toggle("expanded");
-              },
-            );
-            list.insertBefore(sec, el.nextSibling);
+              });
+              list.appendChild(sec);
+            } else {
+              // Regular orchestrator step: show as a step row with spinner.
+              var desc = d.input || "";
+              if (desc.length > 64) desc = desc.slice(0, 64) + "\u2026";
+              var el = createStepRow(toolIdx, d.tool_name, desc, "running", "");
+              toolStepMap[toolIdx] = el;
+              list.appendChild(el);
+            }
+            return;
           }
+
+          // tool_completed
+          if (ev.type === "tool_completed") {
+            var isCCTool = d.tool_name === "implement_changes" || d.tool_name === "run_tests";
+
+            if (isCCTool) {
+              var sec = document.getElementById("cc-sec-" + ccIdx);
+              if (sec) {
+                var label = sec.querySelector(".cc-label");
+                if (label) {
+                  var dur = d.duration_ms !== undefined ? fmtDuration(d.duration_ms) : "";
+                  var statusIcon = d.is_error
+                    ? '<span class="cc-label-status" style="color:var(--red)">✗</span>'
+                    : '<span class="cc-label-status" style="color:var(--green)">✓</span>';
+                  label.innerHTML =
+                    h(ccLabel) +
+                    statusIcon +
+                    (dur ? '<span class="cc-label-dur">' + h(dur) + '</span>' : '');
+                }
+              }
+            } else {
+              var el = toolStepMap[toolIdx];
+              if (el) updateStepRow(el, d);
+            }
+
+            toolIdx++;
+            return;
+          }
+
+          // job_completed
+          if (ev.type === "job_completed") {
+            var footer = createJobFooter(false, d);
+            list.appendChild(footer);
+            return;
+          }
+
+          // job_error
+          if (ev.type === "job_error") {
+            var footer = createJobFooter(true, d);
+            list.appendChild(footer);
+            return;
+          }
+        }
+
+        // ── Step row helpers ──────────────────────────────────────────────────────────
+
+        function createStepRow(idx, toolName, desc, status, dur) {
+          var el = document.createElement("div");
+          el.className = "step-line";
+          el.id = "step-" + idx;
+          el.innerHTML = stepRowInner(toolName, desc, status, dur, null);
+          return el;
+        }
+
+        function stepRowInner(toolName, desc, status, dur, prURL) {
+          var dotHtml;
+          if (status === "running") {
+            dotHtml = '<span class="step-dot"><span class="step-pulse"></span></span>';
+          } else if (status === "error") {
+            dotHtml = '<span class="step-dot" style="color:var(--red)">✗</span>';
+          } else {
+            dotHtml = '<span class="step-dot" style="color:var(--green)">✓</span>';
+          }
+          var descHtml = "";
+          if (prURL) {
+            descHtml = '<span class="step-desc"><a href="' + h(prURL) + '" target="_blank">' + h(desc) + '</a></span>';
+          } else if (desc) {
+            descHtml = '<span class="step-desc">' + h(desc) + '</span>';
+          }
+          return (
+            dotHtml +
+            '<span class="step-nm">' + h(toolName) + '</span>' +
+            descHtml +
+            (dur ? '<span class="step-dur">' + h(dur) + '</span>' : '<span class="step-dur"></span>')
+          );
+        }
+
+        function updateStepRow(el, d) {
+          if (!el) return;
+          var isErr = d.is_error;
+          var status = isErr ? "error" : "ok";
+          var dur = d.duration_ms !== undefined ? fmtDuration(d.duration_ms) : "";
+
+          var nm = el.querySelector(".step-nm");
+          var descEl = el.querySelector(".step-desc");
+          var toolName = nm ? nm.textContent : "";
+          var desc = descEl ? descEl.textContent : "";
+
+          var prURL = null;
+          if (d.tool_name === "create_pull_request" && !d.is_error) {
+            var m = (d.result_preview || "").match(/https:\/\/github\.com\/[^\s]+\/pull\/\d+/);
+            if (m) {
+              prURL = m[0];
+              desc = m[0].replace("https://github.com/", "");
+            }
+          }
+
+          el.innerHTML = stepRowInner(toolName, desc, status, dur, prURL);
+        }
+
+        function createJobFooter(isErr, d) {
+          var el = document.createElement("div");
+          el.className = "job-footer " + (isErr ? "job-footer-err" : "job-footer-ok");
+
+          var icon = isErr ? "✗" : "✓";
+          var msg = isErr
+            ? (d.error || "Job failed")
+            : (d.final_response || "Done");
+
+          var meta = "";
+          if (d.total_duration_ms !== undefined) meta += fmtDuration(d.total_duration_ms);
+          if (d.total_cost_usd !== undefined) meta += (meta ? " \u00b7 " : "") + fmtCost(d.total_cost_usd);
+
+          el.innerHTML =
+            '<span class="job-footer-icon">' + icon + '</span>' +
+            '<span class="job-footer-msg">' + h(msg) + '</span>' +
+            (meta ? '<span class="job-footer-meta">' + h(meta) + '</span>' : '');
+          return el;
         }
 
         // ── Claude Code item rendering ────────────────────────────────────────────────
@@ -1366,146 +1431,6 @@
           });
           return el;
         }
-
-        // ─────────────────────────────────────────────────────────────────────────────
-
-        function evTag(ev) {
-          switch (ev.type) {
-            case "job_started":
-              return { c: "tag-job", t: "Job" };
-            case "job_completed":
-              return { c: "tag-done", t: "Done" };
-            case "job_error":
-              return { c: "tag-err", t: "Error" };
-            case "llm_call":
-              return { c: "tag-llm", t: "LLM Call" };
-            case "llm_response":
-              return { c: "tag-llm", t: "LLM" };
-            case "tool_started":
-              return { c: "tag-tool", t: "Tool" };
-            case "tool_completed":
-              return { c: "tag-tool", t: "Tool Done" };
-            case "slack_notification":
-              return { c: "tag-slack", t: "Slack" };
-            default:
-              return { c: "tag-job", t: ev.type };
-          }
-        }
-
-        function evName(ev) {
-          var d = ev.data || {};
-          switch (ev.type) {
-            case "job_started":
-              return h((d.task || "").slice(0, 90));
-            case "job_completed":
-              return (
-                '<span class="ev-ok">&#10003;</span> ' +
-                h((d.final_response || "Done").slice(0, 80))
-              );
-            case "job_error":
-              return (
-                '<span class="ev-err">&#10007;</span> ' +
-                h((d.error || "error").slice(0, 80))
-              );
-            case "llm_call":
-              return d.iteration !== undefined
-                ? "iteration " + d.iteration
-                : "";
-            case "llm_response":
-              return h((d.summary || d.stop_reason || "").slice(0, 90));
-            case "tool_started":
-              return "<strong>" + h(d.tool_name || "") + "</strong>";
-            case "tool_completed": {
-              var ok = d.is_error
-                ? '<span class="ev-err">&#10007; error</span>'
-                : '<span class="ev-ok">&#10003;</span>';
-              return "<strong>" + h(d.tool_name || "") + "</strong>  " + ok;
-            }
-            case "slack_notification":
-              return h((d.text || "").slice(0, 90));
-            default:
-              return h(ev.type);
-          }
-        }
-
-        function evBody(ev) {
-          var d = ev.data || {};
-          switch (ev.type) {
-            case "tool_started": {
-              if (!d.input) return "";
-              var inp = d.input;
-              try {
-                inp = JSON.stringify(JSON.parse(d.input), null, 2);
-              } catch (e) {}
-              return h(inp);
-            }
-            case "tool_completed": {
-              if (!d.result_preview) return "";
-              return d.is_error
-                ? '<span style="color:var(--red)">' +
-                    h(d.result_preview) +
-                    "</span>"
-                : h(d.result_preview);
-            }
-            case "llm_response": {
-              var parts = [];
-              if (d.summary) parts.push(h(d.summary));
-              if (d.input_tokens !== undefined) {
-                parts.push(
-                  "Tokens: " + fmtTokens(d.input_tokens) + " in / " +
-                  fmtTokens(d.output_tokens) + " out" +
-                  (d.cache_read_tokens ? " / " + fmtTokens(d.cache_read_tokens) + " cache read" : "") +
-                  (d.cache_write_tokens ? " / " + fmtTokens(d.cache_write_tokens) + " cache write" : "") +
-                  "  \u2192  " + fmtCost(d.cost_usd)
-                );
-              }
-              return parts.join("\n");
-            }
-            case "job_started": {
-              var parts = [];
-              if (d.task) parts.push("Task     " + d.task);
-              if (d.slack_thread_url)
-                parts.push("Slack    " + d.slack_thread_url);
-              if (d.channel) parts.push("Channel  " + d.channel);
-              return parts.length ? h(parts.join("\n")) : "";
-            }
-            case "job_completed": {
-              var parts = [];
-              if (d.final_response) parts.push(h(d.final_response));
-              if (d.total_cost_usd !== undefined) {
-                var dur = d.total_duration_ms !== undefined ? "  Duration: " + fmtDuration(d.total_duration_ms) : "";
-                parts.push(
-                  "Total: " + fmtTokens(d.total_input_tokens) + " in / " +
-                  fmtTokens(d.total_output_tokens) + " out" +
-                  (d.total_cache_read_tokens ? " / " + fmtTokens(d.total_cache_read_tokens) + " cache read" : "") +
-                  "  \u2192  " + fmtCost(d.total_cost_usd) + dur
-                );
-              }
-              return parts.join("\n\n");
-            }
-            case "job_error": {
-              var parts = [];
-              if (d.error)
-                parts.push('<span style="color:var(--red)">' + h(d.error) + "</span>");
-              if (d.total_cost_usd !== undefined) {
-                parts.push(
-                  "Total: " + fmtTokens(d.total_input_tokens) + " in / " +
-                  fmtTokens(d.total_output_tokens) + " out  \u2192  " + fmtCost(d.total_cost_usd)
-                );
-              }
-              return parts.join("\n\n");
-            }
-            default:
-              return "";
-          }
-        }
-
-        function tog(row) {
-          var ev = row.closest(".ev");
-          ev.classList.toggle("closed");
-          ev.classList.toggle("open");
-        }
-        window.tog = tog;
 
         // ── Cost / Token helpers ─────────────────────────────────────────────────────
 
