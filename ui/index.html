@@ -123,22 +123,15 @@
         border-bottom: 1px solid var(--border);
       }
       .nav-brand {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 18px;
+        font-size: 17px;
         font-weight: 600;
-        letter-spacing: -0.01em;
+        letter-spacing: -0.02em;
         color: var(--text-primary);
         text-decoration: none;
       }
       .nav-brand:hover {
         color: var(--text-primary);
         text-decoration: none;
-      }
-      .nav-brand .logo-emoji {
-        font-size: 1.15em;
-        line-height: 1;
       }
 
       /* ── Page ── */
@@ -149,18 +142,13 @@
       }
 
       .page-head {
-        margin-bottom: 32px;
+        margin-bottom: 8px;
       }
       .page-title {
-        font-size: 28px;
+        font-size: 26px;
         font-weight: 700;
-        letter-spacing: -0.025em;
-        line-height: 1.2;
-        margin-bottom: 4px;
-      }
-      .page-sub {
-        color: var(--text-secondary);
-        font-size: 15px;
+        letter-spacing: -0.03em;
+        line-height: 1.25;
       }
 
       .placeholder {
@@ -174,28 +162,22 @@
       .job-list {
         display: flex;
         flex-direction: column;
-        gap: 6px;
       }
 
       .job-row {
         display: flex;
         align-items: center;
         gap: 14px;
-        padding: 16px 20px;
-        background: var(--surface);
-        border-radius: var(--radius);
-        box-shadow: var(--shadow-sm);
-        border: 1px solid var(--border);
+        padding: 12px 12px;
+        margin: 0 -12px;
+        border-radius: var(--radius-sm);
         cursor: pointer;
         color: inherit;
         text-decoration: none;
-        transition:
-          box-shadow 0.2s ease,
-          border-color 0.2s ease;
+        transition: background 0.15s;
       }
       .job-row:hover {
-        box-shadow: var(--shadow);
-        border-color: var(--border-strong);
+        background: var(--surface);
         text-decoration: none;
       }
 
@@ -241,115 +223,71 @@
         color: var(--text-tertiary);
         white-space: nowrap;
       }
-      .job-row-id {
-        font-size: 12px;
-        color: var(--text-tertiary);
-        font-family: "SF Mono", ui-monospace, monospace;
-        white-space: nowrap;
-      }
-      .job-row-arrow {
-        color: var(--text-tertiary);
-        font-size: 16px;
-        font-weight: 300;
-        margin-left: 2px;
-        transition: transform 0.15s ease;
-      }
-      .job-row:hover .job-row-arrow {
-        transform: translateX(2px);
-      }
 
       /* ── Job header ── */
       .job-hdr {
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        box-shadow: var(--shadow-sm);
-        padding: 28px 28px 24px;
-        margin-bottom: 24px;
+        margin-bottom: 32px;
       }
-      .job-hdr-title {
-        font-size: 20px;
-        font-weight: 600;
-        line-height: 1.35;
-        letter-spacing: -0.01em;
-        margin-bottom: 16px;
-        color: var(--text-primary);
-      }
-      .job-hdr-chips {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-      }
-
-      .chip {
+      .job-back {
         display: inline-flex;
         align-items: center;
-        gap: 5px;
-        padding: 6px 14px;
-        border-radius: 20px;
-        font-size: 13px;
-        font-weight: 500;
-        background: var(--surface-inset);
+        gap: 6px;
+        font-size: 14px;
+        color: var(--text-tertiary);
+        margin-bottom: 20px;
+        transition: color 0.15s;
+      }
+      .job-back:hover {
+        color: var(--text-primary);
+        text-decoration: none;
+      }
+      .job-hdr-title {
+        font-size: 26px;
+        font-weight: 700;
+        line-height: 1.25;
+        letter-spacing: -0.03em;
+        margin-bottom: 12px;
+        color: var(--text-primary);
+      }
+      .job-hdr-meta {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 4px 0;
+        font-size: 14px;
         color: var(--text-secondary);
-        border: none;
-        transition: background 0.15s ease;
       }
-      .chip-a {
-        color: var(--accent);
-        background: var(--accent-subtle);
-        cursor: pointer;
+      .job-hdr-meta a {
+        color: var(--text-secondary);
+        transition: color 0.15s;
       }
-      .chip-a:hover {
-        background: rgba(0, 113, 227, 0.14);
+      .job-hdr-meta a:hover {
+        color: var(--text-primary);
         text-decoration: none;
-        color: var(--accent);
       }
-      .chip-pr {
+      .meta-sep {
+        margin: 0 10px;
+        color: var(--text-tertiary);
+        opacity: 0.4;
+        user-select: none;
+      }
+      .job-live {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
         color: var(--green);
-        background: var(--green-subtle);
-        cursor: pointer;
-      }
-      .chip-pr:hover {
-        background: rgba(52, 199, 89, 0.18);
-        text-decoration: none;
-      }
-      .chip-cost {
-        color: var(--orange);
-        background: var(--orange-subtle);
+        font-weight: 500;
       }
 
       /* ── Stats bar ── */
       .stats-bar {
         display: flex;
+        align-items: center;
         flex-wrap: wrap;
-        gap: 6px;
-        margin-bottom: 24px;
-        padding: 16px 20px;
-        background: var(--surface);
-        border-radius: var(--radius);
-        box-shadow: var(--shadow-sm);
-        border: 1px solid var(--border);
-      }
-      .stat-item {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        min-width: 100px;
-        flex: 1;
-      }
-      .stat-label {
-        font-size: 11px;
-        font-weight: 600;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        color: var(--text-tertiary);
-      }
-      .stat-value {
-        font-size: 20px;
-        font-weight: 700;
-        letter-spacing: -0.02em;
-        color: var(--text-primary);
-        font-variant-numeric: tabular-nums;
+        gap: 4px 0;
+        margin-bottom: 28px;
+        font-size: 14px;
+        color: var(--text-secondary);
       }
 
       .job-row-cost {
@@ -359,20 +297,6 @@
         white-space: nowrap;
       }
 
-      /* ── Live bar ── */
-      .live-bar {
-        display: none;
-        align-items: center;
-        gap: 8px;
-        margin-bottom: 20px;
-        padding: 10px 16px;
-        background: var(--green-subtle);
-        border-radius: var(--radius-sm);
-        font-size: 13px;
-        font-weight: 500;
-        color: var(--green);
-        border: none;
-      }
       .live-pip {
         width: 6px;
         height: 6px;
@@ -796,9 +720,7 @@
   </head>
   <body>
     <nav>
-      <a href="/" class="nav-brand">
-        <span class="logo-emoji">👷</span>Bob
-      </a>
+      <a href="/" class="nav-brand">Bob</a>
     </nav>
     <div class="page" id="app">
       <div class="placeholder">Loading&hellip;</div>
@@ -843,18 +765,15 @@
             return;
           }
 
-          var statsBar = "";
+          var statParts = [];
+          statParts.push(jobs.length + " job" + (jobs.length !== 1 ? "s" : ""));
           if (cachedStats) {
             var s = cachedStats;
-            statsBar =
-              '<div class="stats-bar">' +
-              '<div class="stat-item"><span class="stat-label">Total Spend</span><span class="stat-value">' + fmtCost(s.total_cost_usd) + '</span></div>' +
-              '<div class="stat-item"><span class="stat-label">Jobs</span><span class="stat-value">' + s.total_jobs + '</span></div>' +
-              '<div class="stat-item"><span class="stat-label">Input Tokens</span><span class="stat-value">' + fmtTokens(s.total_input_tokens) + '</span></div>' +
-              '<div class="stat-item"><span class="stat-label">Output Tokens</span><span class="stat-value">' + fmtTokens(s.total_output_tokens) + '</span></div>' +
-              '<div class="stat-item"><span class="stat-label">Cache Read</span><span class="stat-value">' + fmtTokens(s.total_cache_read_tokens) + '</span></div>' +
-              '</div>';
+            if (s.total_cost_usd) statParts.push(fmtCost(s.total_cost_usd) + " spent");
+            if (s.total_input_tokens) statParts.push(fmtTokens(s.total_input_tokens) + " input");
+            if (s.total_output_tokens) statParts.push(fmtTokens(s.total_output_tokens) + " output");
           }
+          var statsBar = '<div class="stats-bar">' + statParts.join('<span class="meta-sep">&middot;</span>') + '</div>';
 
           var rows = jobs
             .map(function (j) {
@@ -875,10 +794,6 @@
                 '<span class="job-row-time">' +
                 ago +
                 "</span>" +
-                '<span class="job-row-id">' +
-                j.id.slice(0, 8) +
-                "</span>" +
-                '<span class="job-row-arrow">&#8250;</span>' +
                 "</a>"
               );
             })
@@ -886,11 +801,6 @@
           app(
             '<div class="page-head">' +
               '<h1 class="page-title">Jobs</h1>' +
-              '<p class="page-sub">' +
-              jobs.length +
-              " job" +
-              (jobs.length !== 1 ? "s" : "") +
-              "</p>" +
               "</div>" +
               statsBar +
               '<div class="job-list">' +
@@ -912,12 +822,12 @@
         var toolStepMap = {};         // toolIdx → DOM element for in-flight steps
         var pendingReads = [];        // buffer for consecutive Read tool calls
         var pendingThinkingEls = [];  // [{el, ts}] waiting for duration update
+        var isLive = false;
 
         function initJob(id) {
           document.title = "Job " + id.slice(0, 8) + " \u2013 Bob";
           app(
             '<div id="jhdr" class="job-hdr"><div class="job-hdr-title" style="color:var(--text-tertiary)">Loading&hellip;</div></div>' +
-              '<div id="lbar" class="live-bar"><span class="live-pip"></span><span>Live</span></div>' +
               '<div id="evlist" class="step-list"></div>' +
               '<div id="prfooter"></div>',
           );
@@ -937,14 +847,16 @@
               (evts || []).forEach(addEvt);
               refreshHdr();
               var es = new EventSource("/events?job=" + id);
-              document.getElementById("lbar").style.display = "flex";
+              isLive = true;
+              refreshHdr();
               es.onmessage = function (e) {
                 addEvt(JSON.parse(e.data));
                 refreshHdr();
                 if (autoScroll) window.scrollTo(0, document.body.scrollHeight);
               };
               es.onerror = function () {
-                document.getElementById("lbar").style.display = "none";
+                isLive = false;
+                refreshHdr();
               };
             })
             .catch(function () {
@@ -955,31 +867,26 @@
         function refreshHdr() {
           var hdr = document.getElementById("jhdr");
           if (!hdr) return;
-          var chips = "";
+          var meta = [];
           if (slackURL)
-            chips +=
-              '<a href="' +
-              h(slackURL) +
-              '" target="_blank" class="chip chip-a">&#8599; Slack thread</a>';
+            meta.push('<a href="' + h(slackURL) + '" target="_blank">Slack thread &#8599;</a>');
           if (prLink)
-            chips +=
-              '<a href="' +
-              h(prLink) +
-              '" target="_blank" class="chip chip-pr">&#8594; View PR</a>';
+            meta.push('<a href="' + h(prLink) + '" target="_blank">Pull request &#8599;</a>');
           if (jobCostUSD > 0)
-            chips += '<span class="chip chip-cost">' + fmtCost(jobCostUSD) + '</span>';
+            meta.push('<span>' + fmtCost(jobCostUSD) + '</span>');
+          if (isLive)
+            meta.push('<span class="job-live"><span class="live-pip"></span> Live</span>');
           hdr.innerHTML =
+            '<a href="/" class="job-back">&#8592; Jobs</a>' +
             '<div class="job-hdr-title">' +
             h(taskText || "Loading\u2026") +
             "</div>" +
-            (chips ? '<div class="job-hdr-chips">' + chips + "</div>" : "");
+            (meta.length ? '<div class="job-hdr-meta">' + meta.join('<span class="meta-sep">&middot;</span>') + "</div>" : "");
 
           var footer = document.getElementById("prfooter");
           if (footer) {
             footer.innerHTML = prLink
-              ? '<a href="' +
-                h(prLink) +
-                '" target="_blank" class="chip chip-pr" style="display:inline-flex;margin-top:24px;font-size:14px;padding:8px 18px">&#8599; View Pull Request on GitHub</a>'
+              ? '<a href="' + h(prLink) + '" target="_blank" style="display:inline-flex;align-items:center;gap:6px;margin-top:24px;font-size:14px;color:var(--text-secondary)">View Pull Request on GitHub &#8599;</a>'
               : "";
           }
         }
