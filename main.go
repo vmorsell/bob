@@ -86,8 +86,9 @@ func main() {
 	})
 	mux.HandleFunc("/api/jobs", hub.ServeJobList)
 	mux.HandleFunc("/api/stats", hub.ServeStats)
-	mux.HandleFunc("/jobs/", serveUI)
-	mux.HandleFunc("/", serveUI)
+	ui := serveUI()
+	mux.Handle("/jobs/", ui)
+	mux.Handle("/", ui)
 
 	log.Println("Bob listening on :8080")
 	if err := http.ListenAndServe(":8080", mux); err != nil {

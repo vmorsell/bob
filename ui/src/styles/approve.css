@@ -1,0 +1,36 @@
+.approve-wrap {
+  padding: 12px 18px;
+}
+.approve-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 20px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--green);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.approve-btn:hover {
+  opacity: 0.85;
+}
+.approve-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.approve-done {
+  padding: 8px 18px;
+  font-size: 14px;
+  color: var(--green);
+  font-weight: 500;
+}
+.superseded-label {
+  padding: 8px 18px;
+  font-size: 14px;
+  color: var(--orange);
+  font-weight: 500;
+}

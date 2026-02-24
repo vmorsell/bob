@@ -1,2 +1,4 @@
 .env
 bob
+ui/dist/
+ui/node_modules/

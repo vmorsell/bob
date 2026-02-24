@@ -1,0 +1,147 @@
+/* Job header */
+.job-hdr {
+  margin-bottom: 32px;
+}
+.job-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--text-tertiary);
+  margin-bottom: 20px;
+  transition: color 0.15s;
+}
+.job-back:hover {
+  color: var(--text-primary);
+  text-decoration: none;
+}
+.job-hdr-title {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.03em;
+  margin-bottom: 12px;
+  color: var(--text-primary);
+}
+.job-hdr-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 0;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+.job-hdr-meta a {
+  color: var(--text-secondary);
+  transition: color 0.15s;
+}
+.job-hdr-meta a:hover {
+  color: var(--text-primary);
+  text-decoration: none;
+}
+.job-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--green);
+  font-weight: 500;
+}
+.live-pip {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+/* Step timeline */
+.step-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.step-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 2px;
+  font-family: "SF Mono", ui-monospace, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.step-dot {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+}
+.step-pulse {
+  display: block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-subtle);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+.step-nm {
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.step-desc {
+  color: var(--text-tertiary);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.step-desc a {
+  color: var(--accent);
+}
+.step-dur {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  padding-left: 12px;
+}
+
+/* CC section spacing within step list */
+.step-list .cc-section {
+  margin: 6px 0;
+}
+
+/* Job footer */
+.job-footer {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 14px 2px 0;
+  border-top: 1px solid var(--border);
+  margin-top: 16px;
+  font-family: "SF Mono", ui-monospace, monospace;
+  font-size: 13px;
+}
+.job-footer-ok {
+  color: var(--green);
+}
+.job-footer-err {
+  color: var(--red);
+}
+.job-footer-icon {
+  flex-shrink: 0;
+  font-size: 14px;
+}
+.job-footer-msg {
+  flex: 1;
+  color: var(--text-secondary);
+}
+.job-footer-meta {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}

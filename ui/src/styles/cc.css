@@ -1,0 +1,325 @@
+/* Claude Code output sections */
+.cc-section {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin: 8px 0;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+.cc-label {
+  padding: 8px 18px;
+  background: var(--surface-inset);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cc-label-status {
+  font-size: 11px;
+}
+.cc-label-dur {
+  font-size: 11px;
+  font-family: "SF Mono", ui-monospace, monospace;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.cc-content {
+  padding: 10px 0;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.cc-section.expanded .cc-content {
+  max-height: none;
+}
+.cc-section .cc-label {
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+.cc-section .cc-label:hover {
+  background: var(--surface-hover);
+}
+.cc-section-terminal .cc-text {
+  font-family: "SF Mono", ui-monospace, monospace;
+}
+
+.cc-text {
+  padding: 3px 18px;
+  font-size: 14px;
+  color: var(--text-primary);
+  line-height: 1.6;
+}
+.cc-text + .cc-text {
+  margin-top: 2px;
+}
+
+.cc-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 18px;
+  font-family: "SF Mono", ui-monospace, monospace;
+  font-size: 13px;
+}
+.cc-arrow {
+  color: var(--text-tertiary);
+}
+.cc-nm {
+  color: var(--text-secondary);
+  font-weight: 600;
+  min-width: 46px;
+  font-size: 13px;
+}
+.cc-arg {
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+/* Diff block */
+.cc-diff {
+  margin: 10px 18px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  font-family: "SF Mono", ui-monospace, monospace;
+  font-size: 13px;
+  border: 1px solid var(--border);
+}
+.cc-diff-hdr {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--surface-inset);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.cc-diff-path {
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.diff-lines {
+  overflow: hidden;
+}
+.dl {
+  padding: 1px 12px;
+  white-space: pre;
+  overflow-x: auto;
+  line-height: 1.6;
+  font-size: 13px;
+}
+.dl-del {
+  background: var(--diff-del-bg);
+  color: var(--diff-del-text);
+}
+.dl-add {
+  background: var(--diff-add-bg);
+  color: var(--diff-add-text);
+}
+.dl-sep {
+  background: var(--surface-inset);
+  color: var(--text-tertiary);
+  text-align: center;
+  padding: 2px 12px;
+}
+
+/* TodoWrite checklist */
+.cc-todos {
+  margin: 10px 18px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+}
+.cc-todo {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.todo-i {
+  flex-shrink: 0;
+  font-size: 14px;
+  margin-top: 1px;
+  font-family: monospace;
+}
+.todo-pending .todo-i {
+  color: var(--text-tertiary);
+}
+.todo-in_progress .todo-i {
+  color: var(--accent);
+}
+.todo-completed .todo-i {
+  color: var(--green);
+}
+.todo-completed .todo-t {
+  text-decoration: line-through;
+  color: var(--text-tertiary);
+}
+
+/* Inline markdown */
+.cc-text strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.cc-text em {
+  font-style: italic;
+}
+.cc-code {
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-family: "SF Mono", ui-monospace, monospace;
+  font-size: 0.88em;
+  color: var(--text-primary);
+}
+.cc-li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 18px;
+}
+.cc-li-sym {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  font-size: 11px;
+  min-width: 14px;
+  text-align: right;
+}
+.cc-li .cc-li-sym {
+  padding-left: 0;
+}
+
+.cc-codeblock {
+  margin: 8px 18px;
+  background: var(--surface-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+}
+.cc-codeblock-hdr {
+  padding: 4px 12px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-family: "SF Mono", ui-monospace, monospace;
+  border-bottom: 1px solid var(--border);
+}
+.cc-codeblock pre {
+  margin: 0;
+  padding: 10px 12px;
+  font-family: "SF Mono", ui-monospace, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre;
+  color: var(--text-primary);
+}
+
+.cc-quote {
+  padding: 3px 18px 3px 30px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  border-left: 3px solid var(--border-strong);
+  margin-left: 18px;
+}
+
+/* Collapsible cc rows (thinking / read-group / agents) */
+.cc-thinking,
+.cc-group,
+.cc-agents {
+  margin: 4px 18px;
+  font-size: 13px;
+  font-family: "SF Mono", ui-monospace, monospace;
+}
+.cc-thinking summary,
+.cc-group summary,
+.cc-agents summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  padding: 2px 0;
+  list-style: none;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cc-thinking summary::-webkit-details-marker,
+.cc-group summary::-webkit-details-marker,
+.cc-agents summary::-webkit-details-marker {
+  display: none;
+}
+.cc-thinking summary:hover,
+.cc-group summary:hover,
+.cc-agents summary:hover {
+  color: var(--text-primary);
+}
+.cc-thinking summary::before,
+.cc-group summary::before,
+.cc-agents summary::before {
+  content: "\203A";
+  font-size: 15px;
+  color: var(--text-tertiary);
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+details.cc-thinking[open] summary::before,
+details.cc-group[open] summary::before,
+details.cc-agents[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.cc-thinking-body {
+  margin-top: 6px;
+  padding: 8px 12px;
+  background: var(--surface-inset);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  border: 1px solid var(--border);
+}
+.cc-agents-body {
+  margin-top: 4px;
+  padding: 6px 12px;
+  background: var(--surface-inset);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+.cc-agents-item {
+  padding: 3px 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.cc-group ul {
+  margin-top: 4px;
+  padding: 6px 12px;
+  background: var(--surface-inset);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  list-style: none;
+}
+.cc-group li {
+  padding: 2px 0;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+/* Tool error */
+.cc-error {
+  padding: 3px 18px;
+  font-size: 13px;
+  font-family: "SF Mono", ui-monospace, monospace;
+  color: var(--red);
+}

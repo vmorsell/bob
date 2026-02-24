@@ -2,9 +2,10 @@ package main
 
 import (
 	"bufio"
-	_ "embed"
+	"embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -17,8 +18,8 @@ import (
 	"github.com/google/uuid"
 )
 
-//go:embed ui/index.html
-var monitorHTML string
+//go:embed all:ui/dist
+var uiFS embed.FS
 
 // EventType identifies the kind of monitoring event.
 type EventType string
@@ -551,10 +552,33 @@ func (h *Hub) ServeStats(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(stats)
 }
 
-// serveUI returns the single-page monitoring app for all UI routes.
-func serveUI(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(monitorHTML))
+// serveUI returns an http.Handler that serves the Vite-built SPA from
+// the embedded filesystem, with a fallback to index.html for client-side routing.
+func serveUI() http.Handler {
+	dist, err := fs.Sub(uiFS, "ui/dist")
+	if err != nil {
+		log.Fatalf("serveUI: failed to sub ui/dist: %v", err)
+	}
+	fileServer := http.FileServer(http.FS(dist))
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Try serving the file directly. If it doesn't exist, fall back to index.html (SPA).
+		path := r.URL.Path
+		if path == "/" {
+			path = "index.html"
+		} else {
+			path = strings.TrimPrefix(path, "/")
+		}
+
+		if _, err := fs.Stat(dist, path); err == nil {
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+
+		// SPA fallback: serve index.html for unmatched paths.
+		r.URL.Path = "/"
+		fileServer.ServeHTTP(w, r)
+	})
 }
 
 
