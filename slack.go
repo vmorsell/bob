@@ -57,7 +57,7 @@ func isApprovalText(text string) bool {
 	return approvalTexts[strings.ToLower(strings.TrimSpace(text))]
 }
 
-func NewSlackHandler(client *slack.Client, signingSecret string, orch *Orchestrator, hub *Hub, botUserID string, approver *Approver, bobURL string, maxPerMinute float64) http.Handler {
+func NewSlackHandler(client *slack.Client, signingSecret string, orch *Orchestrator, hub *Hub, botUserID string, approver *Approver, bobURL string, apiToken string, maxPerMinute float64) http.Handler {
 	limiter := rate.NewLimiter(rate.Limit(maxPerMinute/60), int(maxPerMinute/60)+1)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -120,7 +120,7 @@ func NewSlackHandler(client *slack.Client, signingSecret string, orch *Orchestra
 					return
 				}
 
-				go handleMention(client, orch, botUserID, hub, approver, bobURL, ev)
+				go handleMention(client, orch, botUserID, hub, approver, bobURL, apiToken, ev)
 			}
 		}
 	})
@@ -143,7 +143,7 @@ func replyRateLimited(client *slack.Client, ev *slackevents.AppMentionEvent) {
 	}
 }
 
-func handleMention(client *slack.Client, orch *Orchestrator, botUserID string, hub *Hub, approver *Approver, bobURL string, ev *slackevents.AppMentionEvent) {
+func handleMention(client *slack.Client, orch *Orchestrator, botUserID string, hub *Hub, approver *Approver, bobURL string, apiToken string, ev *slackevents.AppMentionEvent) {
 	// Acknowledge the mention immediately.
 	if err := client.AddReaction("construction_worker", slack.ItemRef{
 		Channel:   ev.Channel,
@@ -202,7 +202,7 @@ func handleMention(client *slack.Client, orch *Orchestrator, botUserID string, h
 		// Post "Working on it..." status message.
 		msg := "Working on it..."
 		if bobURL != "" {
-			msg = fmt.Sprintf("Working on it... Follow my progress here: <%s/jobs/%s>", bobURL, activeJobID)
+			msg = fmt.Sprintf("Working on it... Follow my progress here: <%s/jobs/%s?token=%s>", bobURL, activeJobID, apiToken)
 		}
 		_, _, _ = client.PostMessage(ev.Channel,
 			slack.MsgOptionText(msg, false),
@@ -232,7 +232,7 @@ func handleMention(client *slack.Client, orch *Orchestrator, botUserID string, h
 		result, err = orch.HandleNewRequest(ctx, messages, func(jobID string) {
 			msg := "Working on a plan..."
 			if bobURL != "" {
-				msg = fmt.Sprintf("Working on a plan... Follow my progress here: <%s/jobs/%s>", bobURL, jobID)
+				msg = fmt.Sprintf("Working on a plan... Follow my progress here: <%s/jobs/%s?token=%s>", bobURL, jobID, apiToken)
 			}
 			_, _, _ = client.PostMessage(ev.Channel,
 				slack.MsgOptionText(msg, false),

@@ -19,6 +19,7 @@ func main() {
 	githubOwner := os.Getenv("GITHUB_OWNER")
 	claudeCodeToken := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN")
 	bobURL := os.Getenv("BOB_URL") // e.g. https://bob.example.com
+	apiToken := os.Getenv("BOB_API_TOKEN")
 	if githubOwner == "" {
 		githubOwner = os.Getenv("GITHUB_ORG") // backwards compat
 	}
@@ -31,6 +32,9 @@ func main() {
 	}
 	if claudeCodeToken == "" {
 		log.Fatal("CLAUDE_CODE_OAUTH_TOKEN must be set")
+	}
+	if apiToken == "" {
+		log.Fatal("BOB_API_TOKEN must be set")
 	}
 
 	slackClient := slack.New(botToken)
@@ -57,10 +61,10 @@ func main() {
 	approver := NewApprover(slackClient, hub, orch)
 
 	mux := http.NewServeMux()
-	mux.Handle("/webhooks/slack", NewSlackHandler(slackClient, signingSecret, orch, hub, botUserID, approver, bobURL, maxPerMinute))
+	mux.Handle("/webhooks/slack", NewSlackHandler(slackClient, signingSecret, orch, hub, botUserID, approver, bobURL, apiToken, maxPerMinute))
 	mux.Handle("/webhooks/slack/interactions", NewSlackInteractionHandler(slackClient, signingSecret, approver))
-	mux.HandleFunc("/events", hub.ServeSSE)
-	mux.HandleFunc("/api/jobs/", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/events", requireAuthFunc(apiToken, hub.ServeSSE))
+	mux.Handle("/api/jobs/", requireAuth(apiToken, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// POST /api/jobs/{id}/approve — web UI approval endpoint.
 		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/approve") {
 			path := strings.TrimPrefix(r.URL.Path, "/api/jobs/")
@@ -83,10 +87,11 @@ func main() {
 			return
 		}
 		hub.ServeJobAPI(w, r)
-	})
-	mux.HandleFunc("/api/jobs", hub.ServeJobList)
-	mux.HandleFunc("/api/stats", hub.ServeStats)
+	})))
+	mux.Handle("/api/jobs", requireAuthFunc(apiToken, hub.ServeJobList))
+	mux.Handle("/api/stats", requireAuthFunc(apiToken, hub.ServeStats))
 	ui := serveUI()
+	mux.Handle("/assets/", ui)
 	mux.Handle("/jobs/", ui)
 	mux.Handle("/", ui)
 

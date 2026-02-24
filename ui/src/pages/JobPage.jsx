@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "preact/hooks";
-import { fetchJobEvents } from "../lib/api.js";
+import { fetchJobEvents, tokenQueryParam } from "../lib/api.js";
 import { addEvt, resetEventState } from "../lib/events.js";
 import {
   autoScroll,
@@ -32,7 +32,10 @@ export function JobPage({ id }) {
       .then((evts) => {
         (evts || []).forEach(addEvt);
 
-        const es = new EventSource("/events?job=" + encodeURIComponent(id));
+        let evtURL = "/events?job=" + encodeURIComponent(id);
+        const tqp = tokenQueryParam();
+        if (tqp) evtURL += "&" + tqp;
+        const es = new EventSource(evtURL);
         esRef.current = es;
         isLive.value = true;
 
