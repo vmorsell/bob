@@ -310,7 +310,15 @@ func (o *Orchestrator) processSessionResult(ctx context.Context, jobID string, s
 		return OrchestratorResult{IsJob: true, JobID: jobID, Text: fmt.Sprintf("Claude Code reported an error: %s", sr.ResultText)}, nil
 	}
 
-	// Question from Claude Code.
+	// Clarification needed — detected via text marker (AskUserQuestion is disabled).
+	if marker := "NEEDS_CLARIFICATION:"; strings.Contains(sr.ResultText, marker) {
+		parts := strings.SplitN(sr.ResultText, marker, 2)
+		question := strings.TrimSpace(parts[1])
+		o.hub.SetPhase(jobID, PhaseAwaitingQuestion)
+		return OrchestratorResult{IsJob: true, JobID: jobID, Text: question}, nil
+	}
+
+	// Question from Claude Code (fallback if AskUserQuestion somehow fires).
 	if sr.Question != "" {
 		o.hub.SetPhase(jobID, PhaseAwaitingQuestion)
 		return OrchestratorResult{IsJob: true, JobID: jobID, Text: sr.Question}, nil
