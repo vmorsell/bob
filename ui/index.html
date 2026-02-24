@@ -983,6 +983,7 @@
         var jobCostUSD = 0;
         var toolStepMap = {}; // toolIdx → DOM element for in-flight steps
         var pendingReads = []; // buffer for consecutive Read tool calls
+        var pendingGlobs = []; // buffer for consecutive Glob tool calls
         var pendingThinkingEls = []; // [{el, ts}] waiting for duration update
         var codeBlock = null; // {lang, lines} when inside a fenced code block
         var isLive = false;
@@ -1120,6 +1121,36 @@
           pendingReads = [];
         }
 
+        function flushGlobs(content) {
+          if (!pendingGlobs.length) return;
+          var item;
+          if (pendingGlobs.length === 1) {
+            item = makeToolItem(pendingGlobs[0]);
+          } else {
+            var el = document.createElement("details");
+            el.className = "cc-group";
+            var patterns = pendingGlobs
+              .map(function (gl) {
+                var inp = {};
+                try {
+                  inp = JSON.parse(gl.tool_input || "{}");
+                } catch (e) {}
+                var pat = inp.pattern || inp.path || "";
+                return "<li>" + h(pat || gl.tool_input || "") + "</li>";
+              })
+              .join("");
+            el.innerHTML =
+              "<summary>Glob " +
+              pendingGlobs.length +
+              " patterns</summary><ul>" +
+              patterns +
+              "</ul>";
+            item = el;
+          }
+          if (item) content.appendChild(item);
+          pendingGlobs = [];
+        }
+
         function flushCodeBlock(content) {
           if (!codeBlock) return;
           var el = document.createElement("div");
@@ -1153,6 +1184,7 @@
             var content = document.getElementById("cc-content-" + ccIdx);
             if (content) {
               flushReads(content);
+              flushGlobs(content);
               flushCodeBlock(content);
               var isExpanded =
                 content.parentElement &&
@@ -1261,9 +1293,14 @@
             if (content) {
               updateThinkingDurations();
               if (d.tool_name === "Read") {
+                flushGlobs(content);
                 pendingReads.push(d);
+              } else if (d.tool_name === "Glob") {
+                flushReads(content);
+                pendingGlobs.push(d);
               } else {
                 flushReads(content);
+                flushGlobs(content);
                 var item = makeCCItem(d);
                 if (item) {
                   content.appendChild(item);
@@ -1700,8 +1737,8 @@
           var keys = [
             "file_path",
             "command",
-            "path",
             "pattern",
+            "path",
             "glob",
             "query",
             "description",
