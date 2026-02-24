@@ -19,12 +19,13 @@ const planMarker = "\U0001f4cb *Plan*"
 
 // OrchestratorResult is the outcome of an orchestration run.
 type OrchestratorResult struct {
-	Text       string        // text reply for clarifying questions or errors
-	IsJob      bool          // true if a monitoring job was started
-	PRURL      string        // set if a pull request was created
-	PlanBlocks []slack.Block // set when plan is generated (for Block Kit message)
-	PlanText   string        // full plan text with marker (for MsgOptionText fallback)
-	JobID      string        // job ID (for storing plan msg TS)
+	Text           string        // text reply for clarifying questions or errors
+	IsJob          bool          // true if a monitoring job was started
+	PRURL          string        // set if a pull request was created
+	PlanBlocks     []slack.Block // set when plan is generated (for Block Kit message)
+	PlanText       string        // full plan text with marker (for MsgOptionText fallback)
+	QuestionBlocks []slack.Block // set when clarification is needed (for Block Kit message)
+	JobID          string        // job ID (for storing plan msg TS)
 }
 
 // Orchestrator drives the deterministic coding workflow.
@@ -310,18 +311,10 @@ func (o *Orchestrator) processSessionResult(ctx context.Context, jobID string, s
 		return OrchestratorResult{IsJob: true, JobID: jobID, Text: fmt.Sprintf("Claude Code reported an error: %s", sr.ResultText)}, nil
 	}
 
-	// Clarification needed — detected via text marker (AskUserQuestion is disabled).
-	if marker := "NEEDS_CLARIFICATION:"; strings.Contains(sr.ResultText, marker) {
-		parts := strings.SplitN(sr.ResultText, marker, 2)
-		question := strings.TrimSpace(parts[1])
-		o.hub.SetPhase(jobID, PhaseAwaitingQuestion)
-		return OrchestratorResult{IsJob: true, JobID: jobID, Text: question}, nil
-	}
-
-	// Question from Claude Code (fallback if AskUserQuestion somehow fires).
+	// Clarification needed — detected via AskUserQuestion tool_use.
 	if sr.Question != "" {
 		o.hub.SetPhase(jobID, PhaseAwaitingQuestion)
-		return OrchestratorResult{IsJob: true, JobID: jobID, Text: sr.Question}, nil
+		return OrchestratorResult{IsJob: true, JobID: jobID, Text: sr.Question, QuestionBlocks: formatQuestionBlocks(sr.Question)}, nil
 	}
 
 	// Plan completed (ExitPlanMode called).
@@ -462,6 +455,27 @@ func formatPlanBlocks(plan, jobID string) []slack.Block {
 	actionsBlock := slack.NewActionBlock("plan_actions", approveBtn)
 
 	return []slack.Block{planSection, divider, ctxBlock, actionsBlock}
+}
+
+// formatQuestionBlocks returns Block Kit blocks for a clarification question.
+func formatQuestionBlocks(question string) []slack.Block {
+	displayQuestion := question
+	if len(displayQuestion) > 2800 {
+		displayQuestion = displayQuestion[:2800] + "\n..."
+	}
+
+	section := slack.NewSectionBlock(
+		slack.NewTextBlockObject(slack.MarkdownType, fmt.Sprintf("\u2753 *Clarification needed*\n\n%s", markdownToMrkdwn(displayQuestion)), false, false),
+		nil, nil,
+	)
+
+	divider := slack.NewDividerBlock()
+
+	ctxBlock := slack.NewContextBlock("",
+		slack.NewTextBlockObject(slack.MarkdownType, "Reply in this thread to answer.", false, false),
+	)
+
+	return []slack.Block{section, divider, ctxBlock}
 }
 
 // formatApprovedPlanBlocks returns Block Kit blocks for an already-approved plan (no button).

@@ -753,6 +753,36 @@
         color: var(--red);
       }
 
+      /* ── Question (top-level card, same vocabulary as cc-section) ── */
+      .cc-question {
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        overflow: hidden;
+        margin: 8px 0;
+        background: var(--surface);
+        box-shadow: var(--shadow-sm);
+      }
+      .cc-question-label {
+        padding: 8px 18px;
+        background: var(--surface-inset);
+        border-bottom: 1px solid var(--border);
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--orange);
+      }
+      .cc-question-body {
+        padding: 14px 18px;
+        font-size: 14px;
+        line-height: 1.6;
+        color: var(--text-primary);
+      }
+      .cc-question-action {
+        padding: 0 18px 14px;
+        font-size: 13px;
+      }
+
       /* ── Approve button ── */
       .approve-wrap {
         padding: 12px 18px;
@@ -989,6 +1019,7 @@
         var isLive = false;
         var currentJobID = "";
         var approveEl = null; // current approve button wrapper element
+        var questionEl = null; // current question card element
         var currentPhase = ""; // latest phase from phase_changed events
 
         function initJob(id) {
@@ -1274,6 +1305,12 @@
           // phase_changed: track current phase and refresh header.
           if (ev.type === "phase_changed") {
             currentPhase = d.phase || "";
+            // Question answered — strip the reply link.
+            if (currentPhase !== "awaiting_question" && questionEl) {
+              var qAction = questionEl.querySelector(".cc-question-action");
+              if (qAction) qAction.remove();
+              questionEl = null;
+            }
             refreshHdr();
             return;
           }
@@ -1289,6 +1326,39 @@
 
           // Claude Code output line — append to eagerly-created CC content block.
           if (ev.type === "claude_code_line") {
+            // AskUserQuestion renders outside the plan box as a top-level card.
+            if (d.tool_name === "AskUserQuestion") {
+              var aqInput = {};
+              try { aqInput = JSON.parse(d.tool_input || "{}"); } catch (e) {}
+              var aqText = "";
+              if (aqInput.questions && aqInput.questions.length > 0) {
+                aqText = aqInput.questions[0].question || "";
+              }
+              if (aqText) {
+                // Strip the reply link from the previous question (no longer the active one).
+                if (questionEl) {
+                  var prev = questionEl.querySelector(".cc-question-action");
+                  if (prev) prev.remove();
+                }
+                var list = document.getElementById("evlist");
+                if (list) {
+                  var qEl = document.createElement("div");
+                  qEl.className = "cc-question";
+                  var actionHtml = slackURL
+                    ? '<div class="cc-question-action"><a href="' +
+                      h(slackURL) + '" target="_blank">Reply in Slack &#8599;</a></div>'
+                    : "";
+                  qEl.innerHTML =
+                    '<div class="cc-question-label">Question</div>' +
+                    '<div class="cc-question-body">' + renderMd(aqText) + "</div>" +
+                    actionHtml;
+                  list.appendChild(qEl);
+                  questionEl = qEl;
+                  if (autoScroll) window.scrollTo(0, document.body.scrollHeight);
+                }
+              }
+              return;
+            }
             var content = document.getElementById("cc-content-" + ccIdx);
             if (content) {
               updateThinkingDurations();
@@ -1699,6 +1769,9 @@
           try {
             input = JSON.parse(d.tool_input || "{}");
           } catch (e) {}
+
+          // AskUserQuestion is rendered outside the plan box; suppress here.
+          if (name === "AskUserQuestion") return null;
 
           if (
             (name === "Edit" || name === "Write") &&

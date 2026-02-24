@@ -21,7 +21,7 @@ Requirements for the plan:
 - Include relevant code snippets, function signatures, and type definitions from the existing codebase that the implementer will need to reference
 - Specify the order of operations
 - Note any existing patterns or conventions the implementation should follow
-- If you need clarification from the user before you can produce a complete plan, output "NEEDS_CLARIFICATION:" on its own line followed by your questions as a numbered list. Do NOT call ExitPlanMode. Stop immediately after asking — do not continue exploring or planning.
+- If you need clarification from the user before you can produce a complete plan, use the AskUserQuestion tool. Do NOT call ExitPlanMode. Stop immediately after asking — do not continue exploring or planning.
 
 Do NOT modify any files. Use only read-only tools (Read, Glob, Grep, Task with Explore agents).
 
@@ -103,9 +103,8 @@ func RunSession(ctx context.Context, claudeCodeToken string, hub *Hub, jobID str
 	if opts.PermissionMode != "" {
 		args = append(args, "--permission-mode", opts.PermissionMode)
 	}
-	// All sessions are non-interactive (-p), so disable AskUserQuestion which
-	// fires but has no terminal to block on, polluting session context.
-	args = append(args, "--disallowedTools", "AskUserQuestion")
+	// AskUserQuestion is allowed — the stream parser detects it and kills
+	// the process immediately so no tokens are wasted on the error result.
 	if opts.SessionID != "" {
 		args = append(args, "--resume", opts.SessionID)
 	}
@@ -118,6 +117,7 @@ func RunSession(ctx context.Context, claudeCodeToken string, hub *Hub, jobID str
 	}
 
 	sp := newClaudeStreamParser(hub, jobID)
+	sp.cancelOnQuestion = cancel
 	cmd.Stdout = sp
 	cmd.Stderr = sp
 	runErr := cmd.Run()
@@ -128,7 +128,9 @@ func RunSession(ctx context.Context, claudeCodeToken string, hub *Hub, jobID str
 		return nil, fmt.Errorf("chown back failed: %s: %w", out, chownErr)
 	}
 
-	if runErr != nil {
+	// If the process was killed because AskUserQuestion was detected,
+	// the question was captured — return it as a successful result.
+	if runErr != nil && sp.question == "" {
 		return nil, fmt.Errorf("claude code failed: %s: %w", truncate(sp.raw.String(), 500), runErr)
 	}
 
@@ -144,6 +146,10 @@ type claudeStreamParser struct {
 
 	lineBuf []byte
 	raw     bytes.Buffer // full raw bytes, for error messages
+
+	// cancelOnQuestion, when set, is called when AskUserQuestion is detected
+	// to kill the CLI process immediately and avoid wasted tokens.
+	cancelOnQuestion context.CancelFunc
 
 	// Structured results captured from the stream.
 	sessionID    string
@@ -329,6 +335,11 @@ func (p *claudeStreamParser) processToolUse(block claudeContentBlock, parentTool
 			}
 			if block.ID != "" {
 				p.suppressResultIDs[block.ID] = true
+			}
+			// Kill the CLI process immediately — the question is captured,
+			// no need to wait for the error result and waste tokens.
+			if p.cancelOnQuestion != nil {
+				p.cancelOnQuestion()
 			}
 		case "ExitPlanMode":
 			p.planExited = true

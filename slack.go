@@ -284,6 +284,20 @@ func handleMention(client *slack.Client, orch *Orchestrator, botUserID string, h
 		return
 	}
 
+	// Question with Block Kit blocks.
+	if len(result.QuestionBlocks) > 0 {
+		questionText := fmt.Sprintf("<@%s> %s", ev.User, result.Text)
+		_, _, postErr := client.PostMessage(ev.Channel,
+			slack.MsgOptionText(questionText, false),
+			slack.MsgOptionBlocks(result.QuestionBlocks...),
+			slack.MsgOptionTS(threadTS),
+		)
+		if postErr != nil {
+			log.Printf("failed to post question message: %v", postErr)
+		}
+		return
+	}
+
 	// Standard text reply.
 	var text string
 	if result.IsJob && result.PRURL != "" {
