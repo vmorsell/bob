@@ -150,15 +150,17 @@ type claudeStreamParser struct {
 	resultText   string
 	isError      bool
 
-	pendingTaskDescs  map[string]string // tool_use_id → Task description
-	thinkingStartedAt time.Time
+	pendingTaskDescs    map[string]string // tool_use_id → Task description
+	suppressResultIDs   map[string]bool   // tool_use IDs whose error results should be hidden (ExitPlanMode, AskUserQuestion)
+	thinkingStartedAt   time.Time
 }
 
 func newClaudeStreamParser(hub *Hub, jobID string) *claudeStreamParser {
 	return &claudeStreamParser{
-		hub:              hub,
-		jobID:            jobID,
-		pendingTaskDescs: make(map[string]string),
+		hub:               hub,
+		jobID:             jobID,
+		pendingTaskDescs:   make(map[string]string),
+		suppressResultIDs: make(map[string]bool),
 	}
 }
 
@@ -271,6 +273,12 @@ func (p *claudeStreamParser) processLine(line string) {
 				continue
 			}
 			if block.IsError {
+				// Suppress error results for internal signals (ExitPlanMode, AskUserQuestion)
+				// whose "errors" are just confirmation prompts, not real failures.
+				if p.suppressResultIDs[block.ToolUseID] {
+					delete(p.suppressResultIDs, block.ToolUseID)
+					continue
+				}
 				if p.hub != nil && p.jobID != "" {
 					p.hub.Emit(p.jobID, EventClaudeCodeLine, map[string]any{
 						"tool_error": truncate(block.Content, 300),
@@ -296,11 +304,7 @@ func (p *claudeStreamParser) processLine(line string) {
 		} else {
 			p.resultText = evt.Result
 		}
-		for _, textLine := range strings.Split(p.resultText, "\n") {
-			if strings.TrimSpace(textLine) != "" {
-				p.emit(textLine)
-			}
-		}
+		// Don't re-emit result text — it was already shown from assistant text blocks.
 	case "rate_limit_event":
 		// no-op
 	}
@@ -320,8 +324,14 @@ func (p *claudeStreamParser) processToolUse(block claudeContentBlock, parentTool
 			if err := json.Unmarshal(block.Input, &input); err == nil && len(input.Questions) > 0 {
 				p.question = input.Questions[0].Question
 			}
+			if block.ID != "" {
+				p.suppressResultIDs[block.ID] = true
+			}
 		case "ExitPlanMode":
 			p.planExited = true
+			if block.ID != "" {
+				p.suppressResultIDs[block.ID] = true
+			}
 		case "Write":
 			var input struct {
 				FilePath string `json:"file_path"`

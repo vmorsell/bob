@@ -22,8 +22,8 @@
         --border-strong: rgba(0, 0, 0, 0.1);
         --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
         --shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
-        --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06),
-          0 1px 3px rgba(0, 0, 0, 0.04);
+        --shadow-md:
+          0 4px 12px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.04);
         --text-primary: #1d1d1f;
         --text-secondary: #6e6e73;
         --text-tertiary: #86868b;
@@ -59,10 +59,9 @@
           --border: rgba(255, 255, 255, 0.08);
           --border-strong: rgba(255, 255, 255, 0.14);
           --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-          --shadow: 0 1px 3px rgba(0, 0, 0, 0.4),
-            0 1px 2px rgba(0, 0, 0, 0.3);
-          --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4),
-            0 1px 3px rgba(0, 0, 0, 0.3);
+          --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
+          --shadow-md:
+            0 4px 12px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.3);
           --text-primary: #f5f5f7;
           --text-secondary: #a1a1a6;
           --text-tertiary: #6e6e73;
@@ -630,6 +629,39 @@
         padding-left: 0;
       }
 
+      .cc-codeblock {
+        margin: 8px 18px;
+        background: var(--surface-inset);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        overflow-x: auto;
+      }
+      .cc-codeblock-hdr {
+        padding: 4px 12px;
+        font-size: 11px;
+        color: var(--text-tertiary);
+        font-family: "SF Mono", ui-monospace, monospace;
+        border-bottom: 1px solid var(--border);
+      }
+      .cc-codeblock pre {
+        margin: 0;
+        padding: 10px 12px;
+        font-family: "SF Mono", ui-monospace, monospace;
+        font-size: 13px;
+        line-height: 1.5;
+        white-space: pre;
+        color: var(--text-primary);
+      }
+
+      .cc-quote {
+        padding: 3px 18px 3px 30px;
+        font-size: 14px;
+        color: var(--text-secondary);
+        line-height: 1.6;
+        border-left: 3px solid var(--border-strong);
+        margin-left: 18px;
+      }
+
       /* ── Collapsible cc rows (thinking / read-group / agents) ── */
       .cc-thinking,
       .cc-group,
@@ -652,10 +684,14 @@
       }
       .cc-thinking summary::-webkit-details-marker,
       .cc-group summary::-webkit-details-marker,
-      .cc-agents summary::-webkit-details-marker { display: none; }
+      .cc-agents summary::-webkit-details-marker {
+        display: none;
+      }
       .cc-thinking summary:hover,
       .cc-group summary:hover,
-      .cc-agents summary:hover { color: var(--text-primary); }
+      .cc-agents summary:hover {
+        color: var(--text-primary);
+      }
       /* Rotating expand arrow */
       .cc-thinking summary::before,
       .cc-group summary::before,
@@ -766,11 +802,26 @@
         font-weight: 600;
         letter-spacing: 0.01em;
       }
-      .phase-badge-planning { background: var(--accent-subtle); color: var(--accent); }
-      .phase-badge-awaiting_approval { background: var(--orange-subtle); color: var(--orange); }
-      .phase-badge-awaiting_question { background: var(--purple-subtle); color: var(--purple); }
-      .phase-badge-implementing { background: var(--cyan-subtle); color: var(--cyan); }
-      .phase-badge-done { background: var(--green-subtle); color: var(--green); }
+      .phase-badge-planning {
+        background: var(--accent-subtle);
+        color: var(--accent);
+      }
+      .phase-badge-awaiting_approval {
+        background: var(--orange-subtle);
+        color: var(--orange);
+      }
+      .phase-badge-awaiting_question {
+        background: var(--purple-subtle);
+        color: var(--purple);
+      }
+      .phase-badge-implementing {
+        background: var(--cyan-subtle);
+        color: var(--cyan);
+      }
+      .phase-badge-done {
+        background: var(--green-subtle);
+        color: var(--green);
+      }
 
       .job-row-phase {
         font-size: 12px;
@@ -825,14 +876,24 @@
 
         function loadOverview() {
           Promise.all([
-            fetch("/api/jobs").then(function (r) { return r.json(); }),
-            fetch("/api/stats").then(function (r) { return r.json(); }).catch(function () { return null; }),
-          ]).then(function (results) {
-            cachedStats = results[1];
-            renderOverview(results[0]);
-          }).catch(function () {
-            app('<div class="placeholder">Failed to load.</div>');
-          });
+            fetch("/api/jobs").then(function (r) {
+              return r.json();
+            }),
+            fetch("/api/stats")
+              .then(function (r) {
+                return r.json();
+              })
+              .catch(function () {
+                return null;
+              }),
+          ])
+            .then(function (results) {
+              cachedStats = results[1];
+              renderOverview(results[0]);
+            })
+            .catch(function () {
+              app('<div class="placeholder">Failed to load.</div>');
+            });
         }
 
         function renderOverview(jobs) {
@@ -847,27 +908,39 @@
           statParts.push(jobs.length + " job" + (jobs.length !== 1 ? "s" : ""));
           if (cachedStats) {
             var s = cachedStats;
-            if (s.total_cost_usd) statParts.push(fmtCost(s.total_cost_usd) + " spent");
-            if (s.total_input_tokens) statParts.push(fmtTokens(s.total_input_tokens) + " input");
-            if (s.total_output_tokens) statParts.push(fmtTokens(s.total_output_tokens) + " output");
+            if (s.total_cost_usd)
+              statParts.push(fmtCost(s.total_cost_usd) + " spent");
+            if (s.total_input_tokens)
+              statParts.push(fmtTokens(s.total_input_tokens) + " input");
+            if (s.total_output_tokens)
+              statParts.push(fmtTokens(s.total_output_tokens) + " output");
           }
-          var statsBar = '<div class="stats-bar">' + statParts.join('<span class="meta-sep">&middot;</span>') + '</div>';
+          var statsBar =
+            '<div class="stats-bar">' +
+            statParts.join('<span class="meta-sep">&middot;</span>') +
+            "</div>";
 
           var phaseLabels = {
             planning: "Planning",
             awaiting_approval: "Awaiting Approval",
             awaiting_question: "Awaiting Question",
-            implementing: "Implementing"
+            implementing: "Implementing",
           };
 
           var rows = jobs
             .map(function (j) {
-              var pip = (j.status === "running" && j.phase) ? "pip-" + j.phase : "pip-" + (j.status || "running");
+              var pip =
+                j.status === "running" && j.phase
+                  ? "pip-" + j.phase
+                  : "pip-" + (j.status || "running");
               var ago = relTime(j.started_at);
               var costStr = j.cost_usd ? fmtCost(j.cost_usd) : "";
-              var phaseStr = (j.status === "running" && j.phase && phaseLabels[j.phase])
-                ? '<span class="job-row-phase">' + phaseLabels[j.phase] + '</span>'
-                : "";
+              var phaseStr =
+                j.status === "running" && j.phase && phaseLabels[j.phase]
+                  ? '<span class="job-row-phase">' +
+                    phaseLabels[j.phase] +
+                    "</span>"
+                  : "";
               return (
                 '<a class="job-row" href="/jobs/' +
                 enc(j.id) +
@@ -879,7 +952,9 @@
                 h(j.task || "(untitled)") +
                 "</span>" +
                 phaseStr +
-                (costStr ? '<span class="job-row-cost">' + costStr + "</span>" : "") +
+                (costStr
+                  ? '<span class="job-row-cost">' + costStr + "</span>"
+                  : "") +
                 '<span class="job-row-time">' +
                 ago +
                 "</span>" +
@@ -908,13 +983,14 @@
         var ccIdx = -1;
         var ccLabel = "Claude Code";
         var jobCostUSD = 0;
-        var toolStepMap = {};         // toolIdx → DOM element for in-flight steps
-        var pendingReads = [];        // buffer for consecutive Read tool calls
-        var pendingThinkingEls = [];  // [{el, ts}] waiting for duration update
+        var toolStepMap = {}; // toolIdx → DOM element for in-flight steps
+        var pendingReads = []; // buffer for consecutive Read tool calls
+        var pendingThinkingEls = []; // [{el, ts}] waiting for duration update
+        var codeBlock = null; // {lang, lines} when inside a fenced code block
         var isLive = false;
         var currentJobID = "";
-        var approveEl = null;         // current approve button wrapper element
-        var currentPhase = "";        // latest phase from phase_changed events
+        var approveEl = null; // current approve button wrapper element
+        var currentPhase = ""; // latest phase from phase_changed events
 
         function initJob(id) {
           document.title = "Job " + id.slice(0, 8) + " \u2013 Bob";
@@ -961,34 +1037,56 @@
           if (!hdr) return;
           var meta = [];
           if (slackURL)
-            meta.push('<a href="' + h(slackURL) + '" target="_blank">Slack thread &#8599;</a>');
+            meta.push(
+              '<a href="' +
+                h(slackURL) +
+                '" target="_blank">Slack thread &#8599;</a>',
+            );
           if (prLink)
-            meta.push('<a href="' + h(prLink) + '" target="_blank">Pull request &#8599;</a>');
+            meta.push(
+              '<a href="' +
+                h(prLink) +
+                '" target="_blank">Pull request &#8599;</a>',
+            );
           if (jobCostUSD > 0)
-            meta.push('<span>' + fmtCost(jobCostUSD) + '</span>');
+            meta.push("<span>" + fmtCost(jobCostUSD) + "</span>");
           if (currentPhase && currentPhase !== "done") {
             var phaseLabels = {
               planning: "Planning",
               awaiting_approval: "Awaiting Approval",
               awaiting_question: "Awaiting Question",
-              implementing: "Implementing"
+              implementing: "Implementing",
             };
             var label = phaseLabels[currentPhase] || currentPhase;
-            meta.push('<span class="phase-badge phase-badge-' + currentPhase + '">' + h(label) + '</span>');
+            meta.push(
+              '<span class="phase-badge phase-badge-' +
+                currentPhase +
+                '">' +
+                h(label) +
+                "</span>",
+            );
           }
           if (isLive)
-            meta.push('<span class="job-live"><span class="live-pip"></span> Live</span>');
+            meta.push(
+              '<span class="job-live"><span class="live-pip"></span> Live</span>',
+            );
           hdr.innerHTML =
             '<a href="/" class="job-back">&#8592; Jobs</a>' +
             '<div class="job-hdr-title">' +
             h(taskText || "Loading\u2026") +
             "</div>" +
-            (meta.length ? '<div class="job-hdr-meta">' + meta.join('<span class="meta-sep">&middot;</span>') + "</div>" : "");
+            (meta.length
+              ? '<div class="job-hdr-meta">' +
+                meta.join('<span class="meta-sep">&middot;</span>') +
+                "</div>"
+              : "");
 
           var footer = document.getElementById("prfooter");
           if (footer) {
             footer.innerHTML = prLink
-              ? '<a href="' + h(prLink) + '" target="_blank" style="display:inline-flex;align-items:center;gap:6px;margin-top:24px;font-size:14px;color:var(--text-secondary)">View Pull Request on GitHub &#8599;</a>'
+              ? '<a href="' +
+                h(prLink) +
+                '" target="_blank" style="display:inline-flex;align-items:center;gap:6px;margin-top:24px;font-size:14px;color:var(--text-secondary)">View Pull Request on GitHub &#8599;</a>'
               : "";
           }
         }
@@ -1001,24 +1099,48 @@
           } else {
             var el = document.createElement("details");
             el.className = "cc-group";
-            var paths = pendingReads.map(function(rd) {
-              var inp = {};
-              try { inp = JSON.parse(rd.tool_input || "{}"); } catch(e) {}
-              var fp = inp.file_path || inp.path || "";
-              fp = fp.replace(/^\/workspace\/[^\/]+\//, "");
-              return "<li>" + h(fp || rd.tool_input || "") + "</li>";
-            }).join("");
-            el.innerHTML = "<summary>Read " + pendingReads.length + " files</summary><ul>" + paths + "</ul>";
+            var paths = pendingReads
+              .map(function (rd) {
+                var inp = {};
+                try {
+                  inp = JSON.parse(rd.tool_input || "{}");
+                } catch (e) {}
+                var fp = inp.file_path || inp.path || "";
+                fp = fp.replace(/^\/workspace\/[^\/]+\//, "");
+                return "<li>" + h(fp || rd.tool_input || "") + "</li>";
+              })
+              .join("");
+            el.innerHTML =
+              "<summary>Read " +
+              pendingReads.length +
+              " files</summary><ul>" +
+              paths +
+              "</ul>";
             item = el;
           }
           if (item) content.appendChild(item);
           pendingReads = [];
         }
 
+        function flushCodeBlock(content) {
+          if (!codeBlock) return;
+          var el = document.createElement("div");
+          el.className = "cc-codeblock";
+          el.innerHTML =
+            (codeBlock.lang
+              ? '<div class="cc-codeblock-hdr">' + h(codeBlock.lang) + "</div>"
+              : "") +
+            "<pre>" +
+            h(codeBlock.lines.join("\n")) +
+            "</pre>";
+          content.appendChild(el);
+          codeBlock = null;
+        }
+
         function updateThinkingDurations() {
           if (!pendingThinkingEls.length) return;
           var now = Date.now();
-          pendingThinkingEls.forEach(function(entry) {
+          pendingThinkingEls.forEach(function (entry) {
             var span = entry.el.querySelector(".cc-thinking-dur");
             if (span) span.textContent = fmtDuration(now - entry.ts);
           });
@@ -1028,13 +1150,19 @@
         function addEvt(ev) {
           var d = ev.data || {};
 
-          // Flush pending Read buffer and thinking durations on non-cc-line events.
+          // Flush pending Read buffer, code blocks, and thinking durations on non-cc-line events.
           if (ev.type !== "claude_code_line") {
             var content = document.getElementById("cc-content-" + ccIdx);
             if (content) {
               flushReads(content);
-              var isExpanded = content.parentElement && content.parentElement.classList.contains("expanded");
-              if (!isExpanded && (!content._userScrolled || content._atBottom)) {
+              flushCodeBlock(content);
+              var isExpanded =
+                content.parentElement &&
+                content.parentElement.classList.contains("expanded");
+              if (
+                !isExpanded &&
+                (!content._userScrolled || content._atBottom)
+              ) {
                 content.scrollTop = content.scrollHeight;
               }
             }
@@ -1045,13 +1173,22 @@
           if (ev.type === "llm_response" && d.cost_usd !== undefined) {
             jobCostUSD += d.cost_usd;
           }
-          if ((ev.type === "job_completed" || ev.type === "job_error") && d.total_cost_usd !== undefined) {
+          if (
+            (ev.type === "job_completed" || ev.type === "job_error") &&
+            d.total_cost_usd !== undefined
+          ) {
             jobCostUSD = d.total_cost_usd;
           }
 
           // Extract PR link from create_pull_request completion.
-          if (ev.type === "tool_completed" && d.tool_name === "create_pull_request" && !d.is_error) {
-            var mm = (d.result_preview || "").match(/https:\/\/github\.com\/[^\s]+\/pull\/\d+/);
+          if (
+            ev.type === "tool_completed" &&
+            d.tool_name === "create_pull_request" &&
+            !d.is_error
+          ) {
+            var mm = (d.result_preview || "").match(
+              /https:\/\/github\.com\/[^\s]+\/pull\/\d+/,
+            );
             if (mm) prLink = mm[0];
           }
 
@@ -1069,7 +1206,8 @@
             if (list) {
               var wrap = document.createElement("div");
               wrap.className = "approve-wrap";
-              wrap.innerHTML = '<button class="approve-btn" onclick="window._approvePlan()">Approve Plan</button>';
+              wrap.innerHTML =
+                '<button class="approve-btn" onclick="window._approvePlan()">Approve Plan</button>';
               list.appendChild(wrap);
               approveEl = wrap;
             }
@@ -1111,7 +1249,11 @@
           }
 
           // Skip internal plumbing events — cost is already tracked above.
-          if (ev.type === "slack_notification" || ev.type === "llm_call" || ev.type === "llm_response") {
+          if (
+            ev.type === "slack_notification" ||
+            ev.type === "llm_call" ||
+            ev.type === "llm_response"
+          ) {
             return;
           }
 
@@ -1128,11 +1270,17 @@
                 if (item) {
                   content.appendChild(item);
                   // Auto-scroll the box if user hasn't scrolled or is at the bottom.
-                  var isExpanded = content.parentElement && content.parentElement.classList.contains("expanded");
-                  if (!isExpanded && (!content._userScrolled || content._atBottom)) {
+                  var isExpanded =
+                    content.parentElement &&
+                    content.parentElement.classList.contains("expanded");
+                  if (
+                    !isExpanded &&
+                    (!content._userScrolled || content._atBottom)
+                  ) {
                     content.scrollTop = content.scrollHeight;
                   }
-                  if (autoScroll) window.scrollTo(0, document.body.scrollHeight);
+                  if (autoScroll)
+                    window.scrollTo(0, document.body.scrollHeight);
                 }
               }
             }
@@ -1144,34 +1292,52 @@
 
           // tool_started
           if (ev.type === "tool_started") {
-            var isCCTool = d.tool_name === "implement_changes" || d.tool_name === "run_tests" || d.tool_name === "generate_plan";
+            var isCCTool =
+              d.tool_name === "implement_changes" ||
+              d.tool_name === "run_tests" ||
+              d.tool_name === "generate_plan";
 
             if (isCCTool) {
               ccIdx = toolIdx;
-              ccLabel = d.tool_name === "run_tests" ? "Run Tests" : d.tool_name === "generate_plan" ? "Planning" : "Claude Code";
+              ccLabel =
+                d.tool_name === "run_tests"
+                  ? "Run Tests"
+                  : d.tool_name === "generate_plan"
+                    ? "Planning"
+                    : "Claude Code";
 
               var sec = document.createElement("div");
-              sec.className = "cc-section" + (d.tool_name === "run_tests" ? " cc-section-terminal" : "");
+              sec.className =
+                "cc-section" +
+                (d.tool_name === "run_tests" ? " cc-section-terminal" : "");
               sec.id = "cc-sec-" + ccIdx;
               sec.innerHTML =
                 '<div class="cc-label">' +
                 h(ccLabel) +
-                '</div>' +
-                '<div class="cc-content" id="cc-content-' + ccIdx + '"></div>';
-              sec.querySelector(".cc-label").addEventListener("click", function () {
-                sec.classList.toggle("expanded");
-                if (!sec.classList.contains("expanded")) {
-                  var cc = sec.querySelector(".cc-content");
-                  if (cc) cc.scrollTop = cc.scrollHeight;
-                }
-              });
+                "</div>" +
+                '<div class="cc-content" id="cc-content-' +
+                ccIdx +
+                '"></div>';
+              sec
+                .querySelector(".cc-label")
+                .addEventListener("click", function () {
+                  sec.classList.toggle("expanded");
+                  if (!sec.classList.contains("expanded")) {
+                    var cc = sec.querySelector(".cc-content");
+                    if (cc) cc.scrollTop = cc.scrollHeight;
+                  }
+                });
 
               // Track per-box scroll state for auto-scroll in collapsed mode.
               var ccContent = sec.querySelector(".cc-content");
               ccContent._userScrolled = false;
               ccContent.addEventListener("scroll", function () {
                 ccContent._userScrolled = true;
-                var atBottom = ccContent.scrollHeight - ccContent.clientHeight - ccContent.scrollTop < 4;
+                var atBottom =
+                  ccContent.scrollHeight -
+                    ccContent.clientHeight -
+                    ccContent.scrollTop <
+                  4;
                 ccContent._atBottom = atBottom;
               });
 
@@ -1189,21 +1355,29 @@
 
           // tool_completed
           if (ev.type === "tool_completed") {
-            var isCCTool = d.tool_name === "implement_changes" || d.tool_name === "run_tests" || d.tool_name === "generate_plan";
+            var isCCTool =
+              d.tool_name === "implement_changes" ||
+              d.tool_name === "run_tests" ||
+              d.tool_name === "generate_plan";
 
             if (isCCTool) {
               var sec = document.getElementById("cc-sec-" + ccIdx);
               if (sec) {
                 var label = sec.querySelector(".cc-label");
                 if (label) {
-                  var dur = d.duration_ms !== undefined ? fmtDuration(d.duration_ms) : "";
+                  var dur =
+                    d.duration_ms !== undefined
+                      ? fmtDuration(d.duration_ms)
+                      : "";
                   var statusIcon = d.is_error
                     ? '<span class="cc-label-status" style="color:var(--red)">✗</span>'
                     : '<span class="cc-label-status" style="color:var(--green)">✓</span>';
                   label.innerHTML =
                     h(ccLabel) +
                     statusIcon +
-                    (dur ? '<span class="cc-label-dur">' + h(dur) + '</span>' : '');
+                    (dur
+                      ? '<span class="cc-label-dur">' + h(dur) + "</span>"
+                      : "");
                 }
               }
             } else {
@@ -1217,7 +1391,10 @@
 
           // job_completed
           if (ev.type === "job_completed") {
-            if (approveEl) { approveEl.remove(); approveEl = null; }
+            if (approveEl) {
+              approveEl.remove();
+              approveEl = null;
+            }
             var footer = createJobFooter(false, d);
             list.appendChild(footer);
             return;
@@ -1225,7 +1402,10 @@
 
           // job_error
           if (ev.type === "job_error") {
-            if (approveEl) { approveEl.remove(); approveEl = null; }
+            if (approveEl) {
+              approveEl.remove();
+              approveEl = null;
+            }
             var footer = createJobFooter(true, d);
             list.appendChild(footer);
             return;
@@ -1245,23 +1425,35 @@
         function stepRowInner(toolName, desc, status, dur, prURL) {
           var dotHtml;
           if (status === "running") {
-            dotHtml = '<span class="step-dot"><span class="step-pulse"></span></span>';
+            dotHtml =
+              '<span class="step-dot"><span class="step-pulse"></span></span>';
           } else if (status === "error") {
-            dotHtml = '<span class="step-dot" style="color:var(--red)">✗</span>';
+            dotHtml =
+              '<span class="step-dot" style="color:var(--red)">✗</span>';
           } else {
-            dotHtml = '<span class="step-dot" style="color:var(--green)">✓</span>';
+            dotHtml =
+              '<span class="step-dot" style="color:var(--green)">✓</span>';
           }
           var descHtml = "";
           if (prURL) {
-            descHtml = '<span class="step-desc"><a href="' + h(prURL) + '" target="_blank">' + h(desc) + '</a></span>';
+            descHtml =
+              '<span class="step-desc"><a href="' +
+              h(prURL) +
+              '" target="_blank">' +
+              h(desc) +
+              "</a></span>";
           } else if (desc) {
-            descHtml = '<span class="step-desc">' + h(desc) + '</span>';
+            descHtml = '<span class="step-desc">' + h(desc) + "</span>";
           }
           return (
             dotHtml +
-            '<span class="step-nm">' + h(toolName) + '</span>' +
+            '<span class="step-nm">' +
+            h(toolName) +
+            "</span>" +
             descHtml +
-            (dur ? '<span class="step-dur">' + h(dur) + '</span>' : '<span class="step-dur"></span>')
+            (dur
+              ? '<span class="step-dur">' + h(dur) + "</span>"
+              : '<span class="step-dur"></span>')
           );
         }
 
@@ -1269,7 +1461,8 @@
           if (!el) return;
           var isErr = d.is_error;
           var status = isErr ? "error" : "ok";
-          var dur = d.duration_ms !== undefined ? fmtDuration(d.duration_ms) : "";
+          var dur =
+            d.duration_ms !== undefined ? fmtDuration(d.duration_ms) : "";
 
           var nm = el.querySelector(".step-nm");
           var descEl = el.querySelector(".step-desc");
@@ -1278,7 +1471,9 @@
 
           var prURL = null;
           if (d.tool_name === "create_pull_request" && !d.is_error) {
-            var m = (d.result_preview || "").match(/https:\/\/github\.com\/[^\s]+\/pull\/\d+/);
+            var m = (d.result_preview || "").match(
+              /https:\/\/github\.com\/[^\s]+\/pull\/\d+/,
+            );
             if (m) {
               prURL = m[0];
               desc = m[0].replace("https://github.com/", "");
@@ -1290,21 +1485,30 @@
 
         function createJobFooter(isErr, d) {
           var el = document.createElement("div");
-          el.className = "job-footer " + (isErr ? "job-footer-err" : "job-footer-ok");
+          el.className =
+            "job-footer " + (isErr ? "job-footer-err" : "job-footer-ok");
 
           var icon = isErr ? "✗" : "✓";
           var msg = isErr
-            ? (d.error || "Job failed")
-            : (d.final_response || "Done");
+            ? d.error || "Job failed"
+            : d.final_response || "Done";
 
           var meta = "";
-          if (d.total_duration_ms !== undefined) meta += fmtDuration(d.total_duration_ms);
-          if (d.total_cost_usd !== undefined) meta += (meta ? " \u00b7 " : "") + fmtCost(d.total_cost_usd);
+          if (d.total_duration_ms !== undefined)
+            meta += fmtDuration(d.total_duration_ms);
+          if (d.total_cost_usd !== undefined)
+            meta += (meta ? " \u00b7 " : "") + fmtCost(d.total_cost_usd);
 
           el.innerHTML =
-            '<span class="job-footer-icon">' + icon + '</span>' +
-            '<span class="job-footer-msg">' + h(msg) + '</span>' +
-            (meta ? '<span class="job-footer-meta">' + h(meta) + '</span>' : '');
+            '<span class="job-footer-icon">' +
+            icon +
+            "</span>" +
+            '<span class="job-footer-msg">' +
+            h(msg) +
+            "</span>" +
+            (meta
+              ? '<span class="job-footer-meta">' + h(meta) + "</span>"
+              : "");
           return el;
         }
 
@@ -1317,8 +1521,13 @@
             el.className = "cc-thinking";
             el.innerHTML =
               '<summary>Thought for <span class="cc-thinking-dur">\u2026</span></summary>' +
-              '<pre class="cc-thinking-body">' + h(d.thinking) + "</pre>";
-            pendingThinkingEls.push({ el: el, ts: d.thinking_ts || Date.now() });
+              '<pre class="cc-thinking-body">' +
+              h(d.thinking) +
+              "</pre>";
+            pendingThinkingEls.push({
+              el: el,
+              ts: d.thinking_ts || Date.now(),
+            });
             return el;
           }
 
@@ -1335,13 +1544,24 @@
             var agents = d.agents || [];
             var el = document.createElement("details");
             el.className = "cc-agents";
-            var items = agents.map(function(a) {
-              return '<div class="cc-agents-item">' + h(a.description || "") + "</div>";
-            }).join("");
+            var items = agents
+              .map(function (a) {
+                return (
+                  '<div class="cc-agents-item">' +
+                  h(a.description || "") +
+                  "</div>"
+                );
+              })
+              .join("");
             el.innerHTML =
-              "<summary>" + d.agents_finished + " sub-agent" +
-              (d.agents_finished !== 1 ? "s" : "") + " finished</summary>" +
-              '<div class="cc-agents-body">' + items + "</div>";
+              "<summary>" +
+              d.agents_finished +
+              " sub-agent" +
+              (d.agents_finished !== 1 ? "s" : "") +
+              " finished</summary>" +
+              '<div class="cc-agents-body">' +
+              items +
+              "</div>";
             return el;
           }
 
@@ -1349,7 +1569,41 @@
           var txt = (d.text || "").trimEnd();
           if (!txt) return null;
 
+          // Fenced code block handling: accumulate lines between ``` markers.
+          var fenceMatch = txt.match(/^```(\w*)$/);
+          if (fenceMatch && !codeBlock) {
+            codeBlock = { lang: fenceMatch[1], lines: [] };
+            return null;
+          }
+          if (codeBlock) {
+            if (txt === "```") {
+              var el = document.createElement("div");
+              el.className = "cc-codeblock";
+              el.innerHTML =
+                (codeBlock.lang
+                  ? '<div class="cc-codeblock-hdr">' +
+                    h(codeBlock.lang) +
+                    "</div>"
+                  : "") +
+                "<pre>" +
+                h(codeBlock.lines.join("\n")) +
+                "</pre>";
+              codeBlock = null;
+              return el;
+            }
+            codeBlock.lines.push(d.text || "");
+            return null;
+          }
+
           var el = document.createElement("div");
+
+          // Blockquote: "> text"
+          var bq = txt.match(/^>\s?(.*)$/);
+          if (bq) {
+            el.className = "cc-quote";
+            el.innerHTML = renderMd(bq[1]);
+            return el;
+          }
 
           // Unordered list item: "- text" or "* text"
           var ul = txt.match(/^(\s*)[*\-]\s+(.+)$/);
@@ -1404,18 +1658,26 @@
 
         function makeToolItem(d) {
           var name = d.tool_name || "";
+          // Hide internal signals that aren't meaningful to the user.
+          if (name === "ExitPlanMode" || name === "EnterPlanMode") return null;
           var input = {};
           try {
             input = JSON.parse(d.tool_input || "{}");
           } catch (e) {}
 
-          if ((name === "Edit" || name === "Write") && input.file_path && input.file_path.indexOf(".claude/plans/") !== -1) {
+          if (
+            (name === "Edit" || name === "Write") &&
+            input.file_path &&
+            input.file_path.indexOf(".claude/plans/") !== -1
+          ) {
             var arg = toolArg(name, input);
             var el = document.createElement("div");
             el.className = "cc-row";
             el.innerHTML =
               '<span class="cc-arrow">\u00b7</span>' +
-              '<span class="cc-nm">' + h(name) + "</span>" +
+              '<span class="cc-nm">' +
+              h(name) +
+              "</span>" +
               (arg ? '<span class="cc-arg">' + h(arg) + "</span>" : "");
             return el;
           }
@@ -1560,8 +1822,12 @@
             btn.disabled = true;
             btn.textContent = "Approving\u2026";
           }
-          fetch("/api/jobs/" + enc(currentJobID) + "/approve", { method: "POST" })
-            .then(function (r) { return r.json(); })
+          fetch("/api/jobs/" + enc(currentJobID) + "/approve", {
+            method: "POST",
+          })
+            .then(function (r) {
+              return r.json();
+            })
             .catch(function () {
               if (btn) {
                 btn.disabled = false;
