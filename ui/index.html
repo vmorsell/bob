@@ -198,6 +198,24 @@
       .pip-error {
         background: var(--red);
       }
+      .pip-planning {
+        background: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-subtle);
+        animation: pulse 2s ease-in-out infinite;
+      }
+      .pip-awaiting_approval {
+        background: var(--orange);
+        box-shadow: 0 0 0 3px var(--orange-subtle);
+      }
+      .pip-awaiting_question {
+        background: var(--purple);
+        box-shadow: 0 0 0 3px var(--purple-subtle);
+      }
+      .pip-implementing {
+        background: var(--cyan);
+        box-shadow: 0 0 0 3px var(--cyan-subtle);
+        animation: pulse 2s ease-in-out infinite;
+      }
 
       @keyframes pulse {
         0%,
@@ -732,6 +750,34 @@
         color: var(--green);
         font-weight: 500;
       }
+      .superseded-label {
+        padding: 8px 18px;
+        font-size: 14px;
+        color: var(--orange);
+        font-weight: 500;
+      }
+
+      /* ── Phase badge ── */
+      .phase-badge {
+        display: inline-block;
+        padding: 2px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+      }
+      .phase-badge-planning { background: var(--accent-subtle); color: var(--accent); }
+      .phase-badge-awaiting_approval { background: var(--orange-subtle); color: var(--orange); }
+      .phase-badge-awaiting_question { background: var(--purple-subtle); color: var(--purple); }
+      .phase-badge-implementing { background: var(--cyan-subtle); color: var(--cyan); }
+      .phase-badge-done { background: var(--green-subtle); color: var(--green); }
+
+      .job-row-phase {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text-tertiary);
+        white-space: nowrap;
+      }
 
       /* ── Scrollbar ── */
       ::-webkit-scrollbar {
@@ -807,11 +853,21 @@
           }
           var statsBar = '<div class="stats-bar">' + statParts.join('<span class="meta-sep">&middot;</span>') + '</div>';
 
+          var phaseLabels = {
+            planning: "Planning",
+            awaiting_approval: "Awaiting Approval",
+            awaiting_question: "Awaiting Question",
+            implementing: "Implementing"
+          };
+
           var rows = jobs
             .map(function (j) {
-              var pip = "pip-" + (j.status || "running");
+              var pip = (j.status === "running" && j.phase) ? "pip-" + j.phase : "pip-" + (j.status || "running");
               var ago = relTime(j.started_at);
               var costStr = j.cost_usd ? fmtCost(j.cost_usd) : "";
+              var phaseStr = (j.status === "running" && j.phase && phaseLabels[j.phase])
+                ? '<span class="job-row-phase">' + phaseLabels[j.phase] + '</span>'
+                : "";
               return (
                 '<a class="job-row" href="/jobs/' +
                 enc(j.id) +
@@ -822,6 +878,7 @@
                 '<span class="job-row-task">' +
                 h(j.task || "(untitled)") +
                 "</span>" +
+                phaseStr +
                 (costStr ? '<span class="job-row-cost">' + costStr + "</span>" : "") +
                 '<span class="job-row-time">' +
                 ago +
@@ -857,6 +914,7 @@
         var isLive = false;
         var currentJobID = "";
         var approveEl = null;         // current approve button wrapper element
+        var currentPhase = "";        // latest phase from phase_changed events
 
         function initJob(id) {
           document.title = "Job " + id.slice(0, 8) + " \u2013 Bob";
@@ -908,6 +966,16 @@
             meta.push('<a href="' + h(prLink) + '" target="_blank">Pull request &#8599;</a>');
           if (jobCostUSD > 0)
             meta.push('<span>' + fmtCost(jobCostUSD) + '</span>');
+          if (currentPhase && currentPhase !== "done") {
+            var phaseLabels = {
+              planning: "Planning",
+              awaiting_approval: "Awaiting Approval",
+              awaiting_question: "Awaiting Question",
+              implementing: "Implementing"
+            };
+            var label = phaseLabels[currentPhase] || currentPhase;
+            meta.push('<span class="phase-badge phase-badge-' + currentPhase + '">' + h(label) + '</span>');
+          }
           if (isLive)
             meta.push('<span class="job-live"><span class="live-pip"></span> Live</span>');
           hdr.innerHTML =
@@ -1019,6 +1087,26 @@
               approveEl.appendChild(done);
               approveEl = null;
             }
+            return;
+          }
+
+          // plan_superseded: replace approve button with "Revision requested" label.
+          if (ev.type === "plan_superseded") {
+            if (approveEl) {
+              var lbl = document.createElement("div");
+              lbl.className = "superseded-label";
+              lbl.textContent = "Revision requested";
+              approveEl.innerHTML = "";
+              approveEl.appendChild(lbl);
+              approveEl = null;
+            }
+            return;
+          }
+
+          // phase_changed: track current phase and refresh header.
+          if (ev.type === "phase_changed") {
+            currentPhase = d.phase || "";
+            refreshHdr();
             return;
           }
 

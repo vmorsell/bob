@@ -185,6 +185,19 @@ func handleMention(client *slack.Client, orch *Orchestrator, botUserID string, h
 			return
 		}
 
+		// If giving feedback on an approved plan, immediately invalidate the Slack button.
+		if hasState && state.Phase == PhaseAwaitingApproval && state.PlanMsgTS != "" {
+			blocks := formatSupersededPlanBlocks(state.PlanContent, "Revision requested")
+			_, _, _, updateErr := client.UpdateMessage(ev.Channel, state.PlanMsgTS,
+				slack.MsgOptionText(formatPlanMessage(state.PlanContent), false),
+				slack.MsgOptionBlocks(blocks...),
+			)
+			if updateErr != nil {
+				log.Printf("failed to update old plan message: %v", updateErr)
+			}
+			state.PlanMsgTS = "" // prevent post-session double-update
+		}
+
 		// Reply to active job (question answer or plan feedback).
 		// Post "Working on it..." status message.
 		msg := "Working on it..."

@@ -157,6 +157,12 @@ func (o *Orchestrator) HandleReply(ctx context.Context, jobID, userText string) 
 		return OrchestratorResult{}, fmt.Errorf("no state for job %s", jobID)
 	}
 
+	// If the user is giving feedback on an approved plan, transition back to planning.
+	if state.Phase == PhaseAwaitingApproval {
+		o.hub.SetPhase(jobID, PhasePlanning)
+		o.hub.Emit(jobID, EventPlanSuperseded, nil)
+	}
+
 	repoDir := filepath.Join("/workspace", filepath.Base(state.Repo))
 
 	jobCtx := WithJobID(ctx, jobID)
@@ -285,7 +291,7 @@ func (o *Orchestrator) HandleApproval(ctx context.Context, jobID string) (Orches
 		"total_duration_ms": time.Since(startTime).Milliseconds(),
 	})
 
-	state.Phase = PhaseDone
+	o.hub.SetPhase(jobID, PhaseDone)
 	return OrchestratorResult{IsJob: true, JobID: jobID, PRURL: prURL}, nil
 }
 
@@ -306,7 +312,7 @@ func (o *Orchestrator) processSessionResult(ctx context.Context, jobID string, s
 
 	// Question from Claude Code.
 	if sr.Question != "" {
-		state.Phase = PhaseAwaitingQuestion
+		o.hub.SetPhase(jobID, PhaseAwaitingQuestion)
 		return OrchestratorResult{IsJob: true, JobID: jobID, Text: sr.Question}, nil
 	}
 
@@ -321,7 +327,7 @@ func (o *Orchestrator) processSessionResult(ctx context.Context, jobID string, s
 			planContent = sr.ResultText
 		}
 
-		state.Phase = PhaseAwaitingApproval
+		o.hub.SetPhase(jobID, PhaseAwaitingApproval)
 		state.PlanFilePath = sr.PlanFilePath
 		state.PlanContent = planContent
 
@@ -340,7 +346,7 @@ func (o *Orchestrator) processSessionResult(ctx context.Context, jobID string, s
 
 	// Fallback: no explicit signal — use ResultText as plan.
 	if sr.ResultText != "" {
-		state.Phase = PhaseAwaitingApproval
+		o.hub.SetPhase(jobID, PhaseAwaitingApproval)
 		state.PlanContent = sr.ResultText
 
 		o.hub.Emit(jobID, EventPlanGenerated, map[string]any{"plan": sr.ResultText})
@@ -413,9 +419,7 @@ func (o *Orchestrator) closeJob(ctx context.Context, jobID string, evtType Event
 	channel, _ := ctx.Value(ctxKeyChannel).(string)
 	threadTS, _ := ctx.Value(ctxKeyThreadTS).(string)
 	o.hub.UnregisterThreadJob(channel, threadTS)
-	if state, ok := o.hub.GetJobState(jobID); ok {
-		state.Phase = PhaseDone
-	}
+	o.hub.SetPhase(jobID, PhaseDone)
 }
 
 // formatPlanMessage wraps a plan in the standard format for Slack.
@@ -468,6 +472,27 @@ func formatApprovedPlanBlocks(plan, approvedBy string) []slack.Block {
 
 	ctxBlock := slack.NewContextBlock("",
 		slack.NewTextBlockObject(slack.MarkdownType, fmt.Sprintf("Approved by %s", approvedBy), false, false),
+	)
+
+	return []slack.Block{planSection, divider, ctxBlock}
+}
+
+// formatSupersededPlanBlocks returns Block Kit blocks for a plan that was superseded by feedback (no button).
+func formatSupersededPlanBlocks(plan, label string) []slack.Block {
+	displayPlan := plan
+	if len(displayPlan) > 2800 {
+		displayPlan = displayPlan[:2800] + "\n..."
+	}
+
+	planSection := slack.NewSectionBlock(
+		slack.NewTextBlockObject(slack.MarkdownType, fmt.Sprintf("%s\n\n%s", planMarker, markdownToMrkdwn(displayPlan)), false, false),
+		nil, nil,
+	)
+
+	divider := slack.NewDividerBlock()
+
+	ctxBlock := slack.NewContextBlock("",
+		slack.NewTextBlockObject(slack.MarkdownType, label, false, false),
 	)
 
 	return []slack.Block{planSection, divider, ctxBlock}

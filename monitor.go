@@ -33,6 +33,8 @@ const (
 	EventSlackNotification EventType = "slack_notification"
 	EventPlanGenerated     EventType = "plan_generated"
 	EventPlanApproved      EventType = "plan_approved"
+	EventPlanSuperseded    EventType = "plan_superseded"
+	EventPhaseChanged      EventType = "phase_changed"
 	EventJobCompleted      EventType = "job_completed"
 	EventJobError          EventType = "job_error"
 )
@@ -192,6 +194,19 @@ func (h *Hub) GetJobState(jobID string) (*JobState, bool) {
 	return v.(*JobState), true
 }
 
+// SetPhase updates a job's phase and emits a phase_changed event.
+func (h *Hub) SetPhase(jobID string, phase JobPhase) {
+	if h == nil {
+		return
+	}
+	state, ok := h.GetJobState(jobID)
+	if !ok {
+		return
+	}
+	state.Phase = phase
+	h.Emit(jobID, EventPhaseChanged, map[string]any{"phase": string(phase)})
+}
+
 // TryStartImplementation atomically transitions a job from awaiting_approval to implementing.
 // Returns true if this call won the race, false if already implementing or wrong phase.
 func (h *Hub) TryStartImplementation(jobID string) bool {
@@ -207,6 +222,7 @@ func (h *Hub) TryStartImplementation(jobID string) bool {
 		return false
 	}
 	state.Phase = PhaseImplementing
+	h.Emit(jobID, EventPhaseChanged, map[string]any{"phase": string(PhaseImplementing)})
 	return true
 }
 
@@ -221,6 +237,7 @@ func (h *Hub) ClearImplementation(jobID string) {
 	}
 	if state.Phase == PhaseImplementing {
 		state.Phase = PhaseAwaitingApproval
+		h.Emit(jobID, EventPhaseChanged, map[string]any{"phase": string(PhaseAwaitingApproval)})
 	}
 }
 
@@ -358,6 +375,7 @@ type jobSummary struct {
 	Task      string    `json:"task"`
 	StartedAt time.Time `json:"started_at"`
 	Status    string    `json:"status"`
+	Phase     string    `json:"phase,omitempty"`
 	CostUSD   float64   `json:"cost_usd"`
 }
 
@@ -391,6 +409,7 @@ func (h *Hub) ServeJobList(w http.ResponseWriter, r *http.Request) {
 		scanner := bufio.NewScanner(f)
 		scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 		var cost float64
+		var latestPhase string
 		first := true
 		for scanner.Scan() {
 			var e Event
@@ -409,6 +428,10 @@ func (h *Hub) ServeJobList(w http.ResponseWriter, r *http.Request) {
 				if v, ok := e.Data["cost_usd"].(float64); ok {
 					cost += v
 				}
+			case EventPhaseChanged:
+				if v, ok := e.Data["phase"].(string); ok {
+					latestPhase = v
+				}
 			case EventJobCompleted:
 				summary.Status = "completed"
 				if v, ok := e.Data["total_cost_usd"].(float64); ok {
@@ -423,6 +446,9 @@ func (h *Hub) ServeJobList(w http.ResponseWriter, r *http.Request) {
 		}
 		f.Close()
 		summary.CostUSD = cost
+		if summary.Status == "running" && latestPhase != "" {
+			summary.Phase = latestPhase
+		}
 		jobs = append(jobs, summary)
 	}
 
