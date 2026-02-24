@@ -9,11 +9,36 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 	"golang.org/x/time/rate"
 )
+
+// eventDedup tracks recently seen event timestamps to skip duplicate deliveries.
+type eventDedup struct {
+	mu   sync.Mutex
+	seen map[string]time.Time
+}
+
+func (d *eventDedup) isDuplicate(key string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if _, ok := d.seen[key]; ok {
+		return true
+	}
+	d.seen[key] = time.Now()
+	for k, t := range d.seen {
+		if time.Since(t) > 5*time.Minute {
+			delete(d.seen, k)
+		}
+	}
+	return false
+}
+
+var dedup = &eventDedup{seen: make(map[string]time.Time)}
 
 var mentionRe = regexp.MustCompile(`<@[A-Z0-9]+>\s*`)
 
@@ -90,6 +115,11 @@ func NewSlackHandler(client *slack.Client, signingSecret string, orch *Orchestra
 					return
 				}
 
+				if dedup.isDuplicate(ev.TimeStamp) {
+					log.Printf("duplicate app_mention ts=%s, skipping", ev.TimeStamp)
+					return
+				}
+
 				go handleMention(client, orch, botUserID, hub, approver, bobURL, ev)
 			}
 		}
@@ -127,6 +157,10 @@ func handleMention(client *slack.Client, orch *Orchestrator, botUserID string, h
 	if threadTS == "" {
 		threadTS = ev.TimeStamp
 	}
+
+	// Serialize processing per thread to prevent concurrent --resume calls.
+	hub.LockThread(ev.Channel, threadTS)
+	defer hub.UnlockThread(ev.Channel, threadTS)
 
 	userText := stripMention(ev.Text)
 

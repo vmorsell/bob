@@ -87,7 +87,8 @@ type Hub struct {
 	threadMu   sync.Mutex
 	threadJobs map[string]string // "channel:threadTS" → jobID
 
-	jobStates sync.Map // jobID → *JobState
+	jobStates   sync.Map // jobID → *JobState
+	threadLocks sync.Map // "channel:threadTS" → *sync.Mutex
 }
 
 // NewHub creates a Hub that persists events under dataDir and starts the run goroutine.
@@ -154,6 +155,21 @@ func (h *Hub) UnregisterThreadJob(channel, threadTS string) {
 	h.threadMu.Lock()
 	defer h.threadMu.Unlock()
 	delete(h.threadJobs, channel+":"+threadTS)
+}
+
+// LockThread acquires a per-thread mutex, serializing handleMention calls for the same thread.
+func (h *Hub) LockThread(channel, threadTS string) {
+	key := channel + ":" + threadTS
+	v, _ := h.threadLocks.LoadOrStore(key, &sync.Mutex{})
+	v.(*sync.Mutex).Lock()
+}
+
+// UnlockThread releases the per-thread mutex.
+func (h *Hub) UnlockThread(channel, threadTS string) {
+	key := channel + ":" + threadTS
+	if v, ok := h.threadLocks.Load(key); ok {
+		v.(*sync.Mutex).Unlock()
+	}
 }
 
 // SetJobState stores the state for a job.
