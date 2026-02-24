@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -35,7 +34,6 @@ func main() {
 	}
 
 	slackClient := slack.New(botToken)
-	notifier := NewSlackNotifier(slackClient)
 
 	// Resolve bot user ID once at startup.
 	authResp, err := slackClient.AuthTest()
@@ -47,29 +45,7 @@ func main() {
 
 	hub := NewHub("/workspace/.bob")
 
-	onJobStart := func(ctx context.Context, jobID, phase string) {
-		var msg string
-		switch phase {
-		case "planning":
-			msg = "Working on a plan..."
-			if bobURL != "" {
-				msg = fmt.Sprintf("Working on a plan... Follow my progress here: <%s/jobs/%s>", bobURL, jobID)
-			}
-		case "implementation":
-			msg = "Implementing the approved plan..."
-			if bobURL != "" {
-				msg = fmt.Sprintf("Implementing the approved plan... Follow my progress here: <%s/jobs/%s>", bobURL, jobID)
-			}
-		default:
-			msg = "On it!"
-			if bobURL != "" {
-				msg = fmt.Sprintf("On it! Follow my progress here: <%s/jobs/%s>", bobURL, jobID)
-			}
-		}
-		notifier.Notify(ctx, msg)
-	}
-
-	orch := NewOrchestrator(anthropicKey, githubOwner, githubToken, claudeCodeToken, hub, notifier, onJobStart)
+	orch := NewOrchestrator(anthropicKey, githubOwner, githubToken, claudeCodeToken, hub)
 
 	maxPerMinute := 15.0
 	if v := os.Getenv("MAX_INBOUND_MESSAGES_PER_MIN"); v != "" {
@@ -78,10 +54,10 @@ func main() {
 		}
 	}
 
-	approver := NewApprover(slackClient, hub, orch, botUserID)
+	approver := NewApprover(slackClient, hub, orch)
 
 	mux := http.NewServeMux()
-	mux.Handle("/webhooks/slack", NewSlackHandler(slackClient, signingSecret, orch, hub, botUserID, maxPerMinute))
+	mux.Handle("/webhooks/slack", NewSlackHandler(slackClient, signingSecret, orch, hub, botUserID, approver, bobURL, maxPerMinute))
 	mux.Handle("/webhooks/slack/interactions", NewSlackInteractionHandler(slackClient, signingSecret, approver))
 	mux.HandleFunc("/events", hub.ServeSSE)
 	mux.HandleFunc("/api/jobs/", func(w http.ResponseWriter, r *http.Request) {
@@ -94,13 +70,13 @@ func main() {
 				return
 			}
 
-			meta, ok := hub.GetJobMeta(jobID)
-			if !ok || meta.Channel == "" || meta.ThreadTS == "" {
+			state, ok := hub.GetJobState(jobID)
+			if !ok || state.Channel == "" || state.ThreadTS == "" {
 				http.Error(w, `{"error":"job not found or missing Slack thread info"}`, http.StatusNotFound)
 				return
 			}
 
-			go approver.Approve(context.Background(), jobID, meta.Channel, meta.ThreadTS, "web UI")
+			go approver.Approve(context.Background(), jobID, state.Channel, state.ThreadTS, "web UI")
 
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(`{"ok":true}`))

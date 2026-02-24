@@ -1008,6 +1008,20 @@
             return;
           }
 
+          // plan_approved: replace approve button with "Approved by ..." indicator.
+          if (ev.type === "plan_approved") {
+            if (approveEl) {
+              var who = d.approved_by || "unknown";
+              var done = document.createElement("div");
+              done.className = "approve-done";
+              done.textContent = "\u2713 Approved by " + who;
+              approveEl.innerHTML = "";
+              approveEl.appendChild(done);
+              approveEl = null;
+            }
+            return;
+          }
+
           // Skip internal plumbing events — cost is already tracked above.
           if (ev.type === "slack_notification" || ev.type === "llm_call" || ev.type === "llm_response") {
             return;
@@ -1042,12 +1056,6 @@
 
           // tool_started
           if (ev.type === "tool_started") {
-            // Hide approve button when implementation begins.
-            if (d.tool_name === "implement_changes" && approveEl) {
-              approveEl.remove();
-              approveEl = null;
-            }
-
             var isCCTool = d.tool_name === "implement_changes" || d.tool_name === "run_tests" || d.tool_name === "generate_plan";
 
             if (isCCTool) {
@@ -1313,6 +1321,16 @@
             input = JSON.parse(d.tool_input || "{}");
           } catch (e) {}
 
+          if ((name === "Edit" || name === "Write") && input.file_path && input.file_path.indexOf(".claude/plans/") !== -1) {
+            var arg = toolArg(name, input);
+            var el = document.createElement("div");
+            el.className = "cc-row";
+            el.innerHTML =
+              '<span class="cc-arrow">\u00b7</span>' +
+              '<span class="cc-nm">' + h(name) + "</span>" +
+              (arg ? '<span class="cc-arg">' + h(arg) + "</span>" : "");
+            return el;
+          }
           if (name === "Edit" || name === "Write")
             return makeDiffItem(name, input);
           if (name === "TodoWrite") return makeTodosItem(input);
@@ -1456,11 +1474,6 @@
           }
           fetch("/api/jobs/" + enc(currentJobID) + "/approve", { method: "POST" })
             .then(function (r) { return r.json(); })
-            .then(function (data) {
-              if (approveEl) {
-                approveEl.innerHTML = '<div class="approve-done">\u2713 Approved</div>';
-              }
-            })
             .catch(function () {
               if (btn) {
                 btn.disabled = false;

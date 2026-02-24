@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -33,6 +32,7 @@ const (
 	EventToolCompleted     EventType = "tool_completed"
 	EventSlackNotification EventType = "slack_notification"
 	EventPlanGenerated     EventType = "plan_generated"
+	EventPlanApproved      EventType = "plan_approved"
 	EventJobCompleted      EventType = "job_completed"
 	EventJobError          EventType = "job_error"
 )
@@ -51,10 +51,28 @@ type sseClient struct {
 	send  chan []byte
 }
 
-// JobMeta stores Slack thread coordinates for a job (reverse lookup for web UI approval).
-type JobMeta struct {
-	Channel  string
-	ThreadTS string
+// JobPhase tracks where a job is in its lifecycle.
+type JobPhase string
+
+const (
+	PhasePlanning         JobPhase = "planning"
+	PhaseAwaitingQuestion JobPhase = "awaiting_question"
+	PhaseAwaitingApproval JobPhase = "awaiting_approval"
+	PhaseImplementing     JobPhase = "implementing"
+	PhaseDone             JobPhase = "done"
+)
+
+// JobState holds the full state for an active job.
+type JobState struct {
+	SessionID    string   // planning session ID (for --resume within planning)
+	Repo         string
+	Task         string
+	Phase        JobPhase
+	PlanFilePath string
+	PlanContent  string // cached plan text (read from disk after planning completes)
+	Channel      string
+	ThreadTS     string
+	PlanMsgTS    string
 }
 
 // Hub manages SSE clients, persists events to JSONL files, and fans out events.
@@ -69,9 +87,7 @@ type Hub struct {
 	threadMu   sync.Mutex
 	threadJobs map[string]string // "channel:threadTS" → jobID
 
-	implementingJobs sync.Map // jobID → struct{}, double-approval guard
-	planMsgTS        sync.Map // jobID → plan message timestamp (string)
-	jobMeta          sync.Map // jobID → JobMeta
+	jobStates sync.Map // jobID → *JobState
 }
 
 // NewHub creates a Hub that persists events under dataDir and starts the run goroutine.
@@ -128,7 +144,6 @@ func (h *Hub) RegisterThreadJob(channel, threadTS, jobID string) {
 	h.threadMu.Lock()
 	defer h.threadMu.Unlock()
 	h.threadJobs[channel+":"+threadTS] = jobID
-	h.jobMeta.Store(jobID, JobMeta{Channel: channel, ThreadTS: threadTS})
 }
 
 // UnregisterThreadJob removes the thread→job mapping when a job closes.
@@ -141,62 +156,56 @@ func (h *Hub) UnregisterThreadJob(channel, threadTS string) {
 	delete(h.threadJobs, channel+":"+threadTS)
 }
 
-// TryStartImplementation atomically marks a job as implementing.
-// Returns true if this call won the race, false if already implementing.
+// SetJobState stores the state for a job.
+func (h *Hub) SetJobState(jobID string, state *JobState) {
+	if h == nil {
+		return
+	}
+	h.jobStates.Store(jobID, state)
+}
+
+// GetJobState returns the state for a job.
+func (h *Hub) GetJobState(jobID string) (*JobState, bool) {
+	if h == nil {
+		return nil, false
+	}
+	v, ok := h.jobStates.Load(jobID)
+	if !ok {
+		return nil, false
+	}
+	return v.(*JobState), true
+}
+
+// TryStartImplementation atomically transitions a job from awaiting_approval to implementing.
+// Returns true if this call won the race, false if already implementing or wrong phase.
 func (h *Hub) TryStartImplementation(jobID string) bool {
 	if h == nil {
 		return false
 	}
-	_, loaded := h.implementingJobs.LoadOrStore(jobID, struct{}{})
-	return !loaded
+	state, ok := h.GetJobState(jobID)
+	if !ok {
+		return false
+	}
+	// Only allow transition from awaiting_approval.
+	if state.Phase != PhaseAwaitingApproval {
+		return false
+	}
+	state.Phase = PhaseImplementing
+	return true
 }
 
-// ClearImplementation removes the implementing guard so a retry is possible.
+// ClearImplementation resets a job from implementing back to awaiting_approval so a retry is possible.
 func (h *Hub) ClearImplementation(jobID string) {
 	if h == nil {
 		return
 	}
-	h.implementingJobs.Delete(jobID)
-}
-
-// SetPlanMsgTS stores the Slack message timestamp of the plan message for a job.
-func (h *Hub) SetPlanMsgTS(jobID, ts string) {
-	if h == nil {
+	state, ok := h.GetJobState(jobID)
+	if !ok {
 		return
 	}
-	h.planMsgTS.Store(jobID, ts)
-}
-
-// GetPlanMsgTS returns the stored plan message timestamp for a job.
-func (h *Hub) GetPlanMsgTS(jobID string) string {
-	if h == nil {
-		return ""
+	if state.Phase == PhaseImplementing {
+		state.Phase = PhaseAwaitingApproval
 	}
-	v, ok := h.planMsgTS.Load(jobID)
-	if !ok {
-		return ""
-	}
-	return v.(string)
-}
-
-// SetJobMeta stores the Slack thread coordinates for a job.
-func (h *Hub) SetJobMeta(jobID string, meta JobMeta) {
-	if h == nil {
-		return
-	}
-	h.jobMeta.Store(jobID, meta)
-}
-
-// GetJobMeta returns the stored Slack thread coordinates for a job.
-func (h *Hub) GetJobMeta(jobID string) (JobMeta, bool) {
-	if h == nil {
-		return JobMeta{}, false
-	}
-	v, ok := h.jobMeta.Load(jobID)
-	if !ok {
-		return JobMeta{}, false
-	}
-	return v.(JobMeta), true
 }
 
 // run processes the broadcast channel — single goroutine owns jobFiles.
@@ -506,41 +515,8 @@ func serveUI(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(monitorHTML))
 }
 
-// streamingWriter pipes command output to hub events and buffers the full output.
-type streamingWriter struct {
-	hub   *Hub
-	jobID string
-	buf   *bytes.Buffer
-	line  []byte
-}
-
-func newStreamingWriter(hub *Hub, jobID string) *streamingWriter {
-	return &streamingWriter{
-		hub:   hub,
-		jobID: jobID,
-		buf:   &bytes.Buffer{},
-	}
-}
-
-func (w *streamingWriter) Write(p []byte) (int, error) {
-	w.buf.Write(p)
-	for _, b := range p {
-		if b == '\n' {
-			if w.hub != nil && w.jobID != "" {
-				w.hub.Emit(w.jobID, EventClaudeCodeLine, map[string]any{
-					"text": string(w.line),
-				})
-			}
-			w.line = w.line[:0]
-		} else {
-			w.line = append(w.line, b)
-		}
-	}
-	return len(p), nil
-}
 
 // generateJobID returns a new UUID v4 string.
 func generateJobID() string {
 	return uuid.New().String()
 }
-

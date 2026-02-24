@@ -14,16 +14,14 @@ type Approver struct {
 	slackClient  *slack.Client
 	hub          *Hub
 	orchestrator *Orchestrator
-	botUserID    string
 }
 
 // NewApprover creates an Approver.
-func NewApprover(slackClient *slack.Client, hub *Hub, orch *Orchestrator, botUserID string) *Approver {
+func NewApprover(slackClient *slack.Client, hub *Hub, orch *Orchestrator) *Approver {
 	return &Approver{
 		slackClient:  slackClient,
 		hub:          hub,
 		orchestrator: orch,
-		botUserID:    botUserID,
 	}
 }
 
@@ -31,33 +29,32 @@ func NewApprover(slackClient *slack.Client, hub *Hub, orch *Orchestrator, botUse
 // multiple goroutines; TryStartImplementation provides an atomic guard.
 func (a *Approver) Approve(ctx context.Context, jobID, channel, threadTS, approvedBy string) {
 	if !a.hub.TryStartImplementation(jobID) {
-		log.Printf("approve: job %s already implementing, ignoring duplicate", jobID)
+		log.Printf("approve: job %s already implementing or wrong phase, ignoring", jobID)
 		return
 	}
 
+	a.hub.Emit(jobID, EventPlanApproved, map[string]any{
+		"approved_by": approvedBy,
+	})
+
+	// Ensure context has Slack thread info.
+	ctx = WithSlackThread(ctx, channel, threadTS)
+	ctx = WithHub(ctx, a.hub)
+
 	// Update the plan message: remove button, show "Approved by ...".
-	if planTS := a.hub.GetPlanMsgTS(jobID); planTS != "" {
-		// Fetch the existing message to get the plan text.
-		msgs, _, _, err := a.slackClient.GetConversationReplies(&slack.GetConversationRepliesParameters{
-			ChannelID: channel,
-			Timestamp: planTS,
-			Inclusive: true,
-			Limit:     1,
-		})
-		if err == nil && len(msgs) > 0 {
-			plan := extractPlanFromThread([]Message{{Role: RoleAssistant, Content: msgs[0].Text}})
-			blocks := formatApprovedPlanBlocks(plan, approvedBy)
-			_, _, _, err = a.slackClient.UpdateMessage(channel, planTS,
-				slack.MsgOptionText(msgs[0].Text, false),
-				slack.MsgOptionBlocks(blocks...),
-			)
-			if err != nil {
-				log.Printf("approve: failed to update plan message: %v", err)
-			}
+	state, ok := a.hub.GetJobState(jobID)
+	if ok && state.PlanMsgTS != "" {
+		blocks := formatApprovedPlanBlocks(state.PlanContent, approvedBy)
+		_, _, _, err := a.slackClient.UpdateMessage(channel, state.PlanMsgTS,
+			slack.MsgOptionText(formatPlanMessage(state.PlanContent), false),
+			slack.MsgOptionBlocks(blocks...),
+		)
+		if err != nil {
+			log.Printf("approve: failed to update plan message: %v", err)
 		}
 	}
 
-	// Post "implementing" message to thread.
+	// Post "Implementing..." message to thread.
 	_, _, err := a.slackClient.PostMessage(channel,
 		slack.MsgOptionText("Implementing approved plan...", false),
 		slack.MsgOptionTS(threadTS),
@@ -66,24 +63,7 @@ func (a *Approver) Approve(ctx context.Context, jobID, channel, threadTS, approv
 		log.Printf("approve: failed to post implementing message: %v", err)
 	}
 
-	// Fetch thread messages for orchestrator context.
-	replies, _, _, err := a.slackClient.GetConversationReplies(&slack.GetConversationRepliesParameters{
-		ChannelID: channel,
-		Timestamp: threadTS,
-	})
-	if err != nil {
-		log.Printf("approve: failed to get thread replies: %v", err)
-		a.hub.ClearImplementation(jobID)
-		return
-	}
-
-	messages := threadToMessages(replies, a.botUserID)
-
-	// Build context with Slack thread info.
-	ctx = WithSlackThread(ctx, channel, threadTS)
-	ctx = WithHub(ctx, a.hub)
-
-	result, err := a.orchestrator.ImplementApprovedPlan(ctx, messages)
+	result, err := a.orchestrator.HandleApproval(ctx, jobID)
 
 	var text string
 	if err != nil {

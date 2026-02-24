@@ -17,7 +17,22 @@ import (
 
 var mentionRe = regexp.MustCompile(`<@[A-Z0-9]+>\s*`)
 
-func NewSlackHandler(client *slack.Client, signingSecret string, orch *Orchestrator, hub *Hub, botUserID string, maxPerMinute float64) http.Handler {
+// approvalTexts is the set of messages that count as plan approval.
+var approvalTexts = map[string]bool{
+	"go":         true,
+	"lgtm":       true,
+	"approved":   true,
+	"approve":    true,
+	"ship it":    true,
+	"looks good": true,
+	"yes":        true,
+}
+
+func isApprovalText(text string) bool {
+	return approvalTexts[strings.ToLower(strings.TrimSpace(text))]
+}
+
+func NewSlackHandler(client *slack.Client, signingSecret string, orch *Orchestrator, hub *Hub, botUserID string, approver *Approver, bobURL string, maxPerMinute float64) http.Handler {
 	limiter := rate.NewLimiter(rate.Limit(maxPerMinute/60), int(maxPerMinute/60)+1)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -75,8 +90,7 @@ func NewSlackHandler(client *slack.Client, signingSecret string, orch *Orchestra
 					return
 				}
 
-				// Respond async so Slack gets a timely 200 OK.
-				go handleMention(client, orch, botUserID, hub, ev)
+				go handleMention(client, orch, botUserID, hub, approver, bobURL, ev)
 			}
 		}
 	})
@@ -99,7 +113,7 @@ func replyRateLimited(client *slack.Client, ev *slackevents.AppMentionEvent) {
 	}
 }
 
-func handleMention(client *slack.Client, orch *Orchestrator, botUserID string, hub *Hub, ev *slackevents.AppMentionEvent) {
+func handleMention(client *slack.Client, orch *Orchestrator, botUserID string, hub *Hub, approver *Approver, bobURL string, ev *slackevents.AppMentionEvent) {
 	// Acknowledge the mention immediately.
 	if err := client.AddReaction("construction_worker", slack.ItemRef{
 		Channel:   ev.Channel,
@@ -108,37 +122,77 @@ func handleMention(client *slack.Client, orch *Orchestrator, botUserID string, h
 		log.Printf("failed to add reaction: %v", err)
 	}
 
-	var messages []Message
-
-	if ev.ThreadTimeStamp != "" {
-		// Message is in a thread — fetch full thread for context.
-		replies, _, _, err := client.GetConversationReplies(&slack.GetConversationRepliesParameters{
-			ChannelID: ev.Channel,
-			Timestamp: ev.ThreadTimeStamp,
-		})
-		if err != nil {
-			log.Printf("failed to get thread replies: %v", err)
-			// Fall back to just the mention text.
-			messages = []Message{{Role: RoleUser, Content: stripMention(ev.Text)}}
-		} else {
-			messages = threadToMessages(replies, botUserID)
-		}
-	} else {
-		messages = []Message{{Role: RoleUser, Content: stripMention(ev.Text)}}
-	}
-
 	// Determine thread timestamp for replies.
 	threadTS := ev.ThreadTimeStamp
 	if threadTS == "" {
 		threadTS = ev.TimeStamp
 	}
 
-	// Inject Slack context and hub so tools can send notifications mid-execution.
+	userText := stripMention(ev.Text)
+
+	// Build context with Slack thread info.
 	ctx := WithSlackThread(context.Background(), ev.Channel, threadTS)
 	ctx = WithMentionTS(ctx, ev.TimeStamp)
 	ctx = WithHub(ctx, hub)
 
-	result, err := orch.Orchestrate(ctx, messages)
+	// Check for active job in this thread.
+	activeJobID := hub.ActiveJobForThread(ev.Channel, threadTS)
+
+	var result OrchestratorResult
+	var err error
+
+	if activeJobID != "" {
+		state, hasState := hub.GetJobState(activeJobID)
+
+		if hasState && state.Phase == PhaseAwaitingApproval && isApprovalText(userText) {
+			// Text-based approval — delegate to approver.
+			removeReaction(client, ev.Channel, ev.TimeStamp)
+			approver.Approve(ctx, activeJobID, ev.Channel, threadTS, fmt.Sprintf("<@%s>", ev.User))
+			return
+		}
+
+		// Reply to active job (question answer or plan feedback).
+		// Post "Working on it..." status message.
+		msg := "Working on it..."
+		if bobURL != "" {
+			msg = fmt.Sprintf("Working on it... Follow my progress here: <%s/jobs/%s>", bobURL, activeJobID)
+		}
+		_, _, _ = client.PostMessage(ev.Channel,
+			slack.MsgOptionText(msg, false),
+			slack.MsgOptionTS(threadTS),
+		)
+
+		result, err = orch.HandleReply(ctx, activeJobID, userText)
+	} else {
+		// New request — parse intent and start planning.
+		// Need full thread context for intent parsing.
+		var messages []Message
+		if ev.ThreadTimeStamp != "" {
+			replies, _, _, err := client.GetConversationReplies(&slack.GetConversationRepliesParameters{
+				ChannelID: ev.Channel,
+				Timestamp: ev.ThreadTimeStamp,
+			})
+			if err != nil {
+				log.Printf("failed to get thread replies: %v", err)
+				messages = []Message{{Role: RoleUser, Content: userText}}
+			} else {
+				messages = threadToMessages(replies, botUserID)
+			}
+		} else {
+			messages = []Message{{Role: RoleUser, Content: userText}}
+		}
+
+		result, err = orch.HandleNewRequest(ctx, messages, func(jobID string) {
+			msg := "Working on a plan..."
+			if bobURL != "" {
+				msg = fmt.Sprintf("Working on a plan... Follow my progress here: <%s/jobs/%s>", bobURL, jobID)
+			}
+			_, _, _ = client.PostMessage(ev.Channel,
+				slack.MsgOptionText(msg, false),
+				slack.MsgOptionTS(threadTS),
+			)
+		})
+	}
 
 	removeReaction(client, ev.Channel, ev.TimeStamp)
 
@@ -155,39 +209,30 @@ func handleMention(client *slack.Client, orch *Orchestrator, botUserID string, h
 		return
 	}
 
-	// Plan with Block Kit blocks: post with blocks + fallback text.
+	// Plan with Block Kit blocks.
 	if len(result.PlanBlocks) > 0 {
 		// If there's a previous plan message for this job, remove its button.
-		if oldTS := hub.GetPlanMsgTS(result.JobID); oldTS != "" {
-			oldMsgs, _, _, err := client.GetConversationReplies(&slack.GetConversationRepliesParameters{
-				ChannelID: ev.Channel,
-				Timestamp: oldTS,
-				Inclusive: true,
-				Limit:     1,
-			})
-			if err == nil && len(oldMsgs) > 0 {
-				oldPlan := extractPlanFromThread([]Message{{Role: RoleAssistant, Content: oldMsgs[0].Text}})
-				updatedBlocks := formatApprovedPlanBlocks(oldPlan, "superseded by updated plan")
-				_, _, _, err = client.UpdateMessage(ev.Channel, oldTS,
-					slack.MsgOptionText(oldMsgs[0].Text, false),
-					slack.MsgOptionBlocks(updatedBlocks...),
-				)
-				if err != nil {
-					log.Printf("failed to update old plan message: %v", err)
-				}
+		if state, ok := hub.GetJobState(result.JobID); ok && state.PlanMsgTS != "" {
+			updatedBlocks := formatApprovedPlanBlocks(state.PlanContent, "superseded by updated plan")
+			_, _, _, updateErr := client.UpdateMessage(ev.Channel, state.PlanMsgTS,
+				slack.MsgOptionText(result.PlanText, false),
+				slack.MsgOptionBlocks(updatedBlocks...),
+			)
+			if updateErr != nil {
+				log.Printf("failed to update old plan message: %v", updateErr)
 			}
 		}
 
 		planText := fmt.Sprintf("<@%s> %s", ev.User, result.PlanText)
-		_, msgTS, err := client.PostMessage(ev.Channel,
+		_, msgTS, postErr := client.PostMessage(ev.Channel,
 			slack.MsgOptionText(planText, false),
 			slack.MsgOptionBlocks(result.PlanBlocks...),
 			slack.MsgOptionTS(threadTS),
 		)
-		if err != nil {
-			log.Printf("failed to post plan message: %v", err)
-		} else {
-			hub.SetPlanMsgTS(result.JobID, msgTS)
+		if postErr != nil {
+			log.Printf("failed to post plan message: %v", postErr)
+		} else if state, ok := hub.GetJobState(result.JobID); ok {
+			state.PlanMsgTS = msgTS
 		}
 		return
 	}
@@ -314,7 +359,7 @@ func NewSlackInteractionHandler(client *slack.Client, signingSecret string, appr
 			if threadTS == "" {
 				threadTS = callback.Message.Timestamp
 			}
-			approvedBy := callback.User.Name
+			approvedBy := fmt.Sprintf("<@%s>", callback.User.ID)
 
 			// Return 200 immediately — Slack requires <3s response.
 			w.WriteHeader(http.StatusOK)
