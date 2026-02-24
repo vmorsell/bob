@@ -420,7 +420,7 @@ func (o *Orchestrator) closeJob(ctx context.Context, jobID string, evtType Event
 
 // formatPlanMessage wraps a plan in the standard format for Slack.
 func formatPlanMessage(plan string) string {
-	return fmt.Sprintf("%s\n\n%s\n\n_Reply with your feedback, or say \"go\" to approve and start implementation._", planMarker, plan)
+	return fmt.Sprintf("%s\n\n%s\n\n_Reply with your feedback, or say \"go\" to approve and start implementation._", planMarker, markdownToMrkdwn(plan))
 }
 
 // formatPlanBlocks returns Block Kit blocks for a plan message with an Approve button.
@@ -432,7 +432,7 @@ func formatPlanBlocks(plan, jobID string) []slack.Block {
 	}
 
 	planSection := slack.NewSectionBlock(
-		slack.NewTextBlockObject(slack.MarkdownType, fmt.Sprintf("%s\n\n%s", planMarker, displayPlan), false, false),
+		slack.NewTextBlockObject(slack.MarkdownType, fmt.Sprintf("%s\n\n%s", planMarker, markdownToMrkdwn(displayPlan)), false, false),
 		nil, nil,
 	)
 
@@ -460,7 +460,7 @@ func formatApprovedPlanBlocks(plan, approvedBy string) []slack.Block {
 	}
 
 	planSection := slack.NewSectionBlock(
-		slack.NewTextBlockObject(slack.MarkdownType, fmt.Sprintf("%s\n\n%s", planMarker, displayPlan), false, false),
+		slack.NewTextBlockObject(slack.MarkdownType, fmt.Sprintf("%s\n\n%s", planMarker, markdownToMrkdwn(displayPlan)), false, false),
 		nil, nil,
 	)
 
