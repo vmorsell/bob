@@ -60,15 +60,29 @@ type SessionResult struct {
 }
 
 // resetRepo resets a cloned repo to clean main state.
-func resetRepo(ctx context.Context, repoDir string) error {
+// fetchURL is the token-bearing URL used to fetch latest main (since the stored
+// origin URL no longer contains credentials).
+func resetRepo(ctx context.Context, repoDir, fetchURL, token string) error {
 	chownRoot := exec.CommandContext(ctx, "chown", "-R", "0:0", repoDir)
 	if out, err := chownRoot.CombinedOutput(); err != nil {
 		return fmt.Errorf("chown to root failed: %s: %w", out, err)
 	}
-	resetCmd := exec.CommandContext(ctx, "sh", "-c", "git checkout . && git clean -fd && git checkout main && git pull")
-	resetCmd.Dir = repoDir
-	if out, err := resetCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git reset failed: %s: %w", out, err)
+	steps := []struct {
+		args []string
+		desc string
+	}{
+		{[]string{"checkout", "."}, "discard changes"},
+		{[]string{"clean", "-fd"}, "clean untracked"},
+		{[]string{"checkout", "main"}, "checkout main"},
+		{[]string{"fetch", fetchURL, "main"}, "fetch latest"},
+		{[]string{"reset", "--hard", "FETCH_HEAD"}, "reset to latest"},
+	}
+	for _, s := range steps {
+		cmd := exec.CommandContext(ctx, "git", s.args...)
+		cmd.Dir = repoDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("%s failed: %s: %w", s.desc, sanitizeGitOutput(out, token), err)
+		}
 	}
 	return nil
 }

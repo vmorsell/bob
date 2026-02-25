@@ -128,6 +128,15 @@ func CloneRepo(ctx context.Context, owner, token, repoName string) error {
 	if err != nil {
 		return fmt.Errorf("git clone failed: %s: %w", sanitizeGitOutput(output, token), err)
 	}
+
+	// Remove token from stored remote URL so Claude Code can't read it from .git/config.
+	cleanURL := fmt.Sprintf("https://github.com/%s/%s.git", owner, repoName)
+	setURL := exec.CommandContext(ctx, "git", "remote", "set-url", "origin", cleanURL)
+	setURL.Dir = dest
+	if out, err := setURL.CombinedOutput(); err != nil {
+		return fmt.Errorf("set-url failed: %s: %w", out, err)
+	}
+
 	return nil
 }
 
@@ -180,13 +189,14 @@ func CreatePullRequest(ctx context.Context, owner, token, repoName, title, branc
 		return "", fmt.Errorf("commit failed: %s: %w", out, err)
 	}
 
+	// Token URL for authenticated fetch/push operations.
+	pushURL := fmt.Sprintf("https://x-access-token:%s@github.com/%s/%s.git", token, owner, repoName)
+
 	// Unshallow if needed (ignore error if already full).
-	unshallow := exec.CommandContext(ctx, "git", "fetch", "--unshallow")
+	// Uses explicit token URL since the stored origin no longer has credentials.
+	unshallow := exec.CommandContext(ctx, "git", "fetch", "--unshallow", pushURL)
 	unshallow.Dir = repoDir
 	unshallow.CombinedOutput() // best-effort
-
-	// Push branch.
-	pushURL := fmt.Sprintf("https://x-access-token:%s@github.com/%s/%s.git", token, owner, repoName)
 	pushCmd := exec.CommandContext(ctx, "git", "push", pushURL, branch)
 	pushCmd.Dir = repoDir
 	if out, err := pushCmd.CombinedOutput(); err != nil {

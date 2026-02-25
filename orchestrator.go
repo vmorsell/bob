@@ -143,7 +143,8 @@ func (o *Orchestrator) HandleNewRequest(ctx context.Context, messages []Message,
 	})
 
 	// Reset repo to clean state.
-	if err := resetRepo(jobCtx, repoDir); err != nil {
+	fetchURL := fmt.Sprintf("https://x-access-token:%s@github.com/%s/%s.git", o.githubToken, o.githubOwner, filepath.Base(intent.Repo))
+	if err := resetRepo(jobCtx, repoDir, fetchURL, o.githubToken); err != nil {
 		o.closeJob(ctx, jobID, EventJobError, map[string]any{
 			"error": err.Error(), "total_duration_ms": time.Since(startTime).Milliseconds(), "total_cost_usd": intentCost,
 		})
@@ -254,7 +255,8 @@ func (o *Orchestrator) HandleApproval(ctx context.Context, jobID string) (Orches
 	startTime := time.Now()
 
 	// Reset repo to clean main before implementation.
-	if err := resetRepo(jobCtx, repoDir); err != nil {
+	fetchURL := fmt.Sprintf("https://x-access-token:%s@github.com/%s/%s.git", o.githubToken, o.githubOwner, filepath.Base(repo))
+	if err := resetRepo(jobCtx, repoDir, fetchURL, o.githubToken); err != nil {
 		o.hub.ClearImplementation(jobID)
 		return OrchestratorResult{IsJob: true, JobID: jobID, Text: fmt.Sprintf("Failed to reset repository: %s", err.Error())}, nil
 	}
