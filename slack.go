@@ -40,6 +40,10 @@ func (d *eventDedup) isDuplicate(key string) bool {
 
 var dedup = &eventDedup{seen: make(map[string]time.Time)}
 
+// maxSlackBodySize is the maximum request body size accepted from Slack webhooks.
+// Slack events are typically small (< 100KB). 1 MB is generous.
+const maxSlackBodySize = 1 << 20 // 1 MB
+
 var mentionRe = regexp.MustCompile(`<@[A-Z0-9]+>\s*`)
 
 // approvalTexts is the set of messages that count as plan approval.
@@ -66,9 +70,13 @@ func NewSlackHandler(client *slack.Client, signingSecret string, orch *Orchestra
 			return
 		}
 
-		body, err := io.ReadAll(r.Body)
+		body, err := io.ReadAll(io.LimitReader(r.Body, maxSlackBodySize+1))
 		if err != nil {
 			http.Error(w, "failed to read body", http.StatusBadRequest)
+			return
+		}
+		if len(body) > maxSlackBodySize {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
 			return
 		}
 
@@ -380,9 +388,13 @@ func NewSlackInteractionHandler(client *slack.Client, signingSecret string, appr
 			return
 		}
 
-		body, err := io.ReadAll(r.Body)
+		body, err := io.ReadAll(io.LimitReader(r.Body, maxSlackBodySize+1))
 		if err != nil {
 			http.Error(w, "failed to read body", http.StatusBadRequest)
+			return
+		}
+		if len(body) > maxSlackBodySize {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
 			return
 		}
 
