@@ -186,16 +186,24 @@ func handleMention(client *slack.Client, orch *Orchestrator, botUserID string, h
 		}
 
 		// If giving feedback on an approved plan, immediately invalidate the Slack button.
-		if hasState && state.Phase == PhaseAwaitingApproval && state.PlanMsgTS != "" {
-			blocks := formatSupersededPlanBlocks(state.PlanContent, "Revision requested")
-			_, _, _, updateErr := client.UpdateMessage(ev.Channel, state.PlanMsgTS,
-				slack.MsgOptionText(formatPlanMessage(state.PlanContent), false),
-				slack.MsgOptionBlocks(blocks...),
-			)
-			if updateErr != nil {
-				log.Printf("failed to update old plan message: %v", updateErr)
+		if hasState && state.Phase == PhaseAwaitingApproval {
+			state.mu.Lock()
+			planMsgTS := state.PlanMsgTS
+			planContent := state.PlanContent
+			state.mu.Unlock()
+			if planMsgTS != "" {
+				blocks := formatSupersededPlanBlocks(planContent, "Revision requested")
+				_, _, _, updateErr := client.UpdateMessage(ev.Channel, planMsgTS,
+					slack.MsgOptionText(formatPlanMessage(planContent), false),
+					slack.MsgOptionBlocks(blocks...),
+				)
+				if updateErr != nil {
+					log.Printf("failed to update old plan message: %v", updateErr)
+				}
+				state.mu.Lock()
+				state.PlanMsgTS = "" // prevent post-session double-update
+				state.mu.Unlock()
 			}
-			state.PlanMsgTS = "" // prevent post-session double-update
 		}
 
 		// Reply to active job (question answer or plan feedback).
@@ -259,14 +267,20 @@ func handleMention(client *slack.Client, orch *Orchestrator, botUserID string, h
 	// Plan with Block Kit blocks.
 	if len(result.PlanBlocks) > 0 {
 		// If there's a previous plan message for this job, remove its button.
-		if state, ok := hub.GetJobState(result.JobID); ok && state.PlanMsgTS != "" {
-			updatedBlocks := formatApprovedPlanBlocks(state.PlanContent, "superseded by updated plan")
-			_, _, _, updateErr := client.UpdateMessage(ev.Channel, state.PlanMsgTS,
-				slack.MsgOptionText(result.PlanText, false),
-				slack.MsgOptionBlocks(updatedBlocks...),
-			)
-			if updateErr != nil {
-				log.Printf("failed to update old plan message: %v", updateErr)
+		if state, ok := hub.GetJobState(result.JobID); ok {
+			state.mu.Lock()
+			planMsgTS := state.PlanMsgTS
+			planContent := state.PlanContent
+			state.mu.Unlock()
+			if planMsgTS != "" {
+				updatedBlocks := formatApprovedPlanBlocks(planContent, "superseded by updated plan")
+				_, _, _, updateErr := client.UpdateMessage(ev.Channel, planMsgTS,
+					slack.MsgOptionText(result.PlanText, false),
+					slack.MsgOptionBlocks(updatedBlocks...),
+				)
+				if updateErr != nil {
+					log.Printf("failed to update old plan message: %v", updateErr)
+				}
 			}
 		}
 
@@ -279,7 +293,9 @@ func handleMention(client *slack.Client, orch *Orchestrator, botUserID string, h
 		if postErr != nil {
 			log.Printf("failed to post plan message: %v", postErr)
 		} else if state, ok := hub.GetJobState(result.JobID); ok {
+			state.mu.Lock()
 			state.PlanMsgTS = msgTS
+			state.mu.Unlock()
 		}
 		return
 	}

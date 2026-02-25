@@ -195,7 +195,9 @@ func (o *Orchestrator) HandleReply(ctx context.Context, jobID, userText string) 
 
 	// Update session ID if it changed.
 	if sr.SessionID != "" {
+		state.mu.Lock()
 		state.SessionID = sr.SessionID
+		state.mu.Unlock()
 	}
 
 	return o.processSessionResult(ctx, jobID, sr, repoDir)
@@ -208,7 +210,14 @@ func (o *Orchestrator) HandleApproval(ctx context.Context, jobID string) (Orches
 		return OrchestratorResult{}, fmt.Errorf("no state for job %s", jobID)
 	}
 
-	repoDir := filepath.Join("/workspace", filepath.Base(state.Repo))
+	// Snapshot fields under lock for the implementation session.
+	state.mu.Lock()
+	repo := state.Repo
+	task := state.Task
+	planContent := state.PlanContent
+	state.mu.Unlock()
+
+	repoDir := filepath.Join("/workspace", filepath.Base(repo))
 
 	jobCtx := WithJobID(ctx, jobID)
 	jobCtx = WithHub(jobCtx, o.hub)
@@ -221,10 +230,10 @@ func (o *Orchestrator) HandleApproval(ctx context.Context, jobID string) (Orches
 		return OrchestratorResult{IsJob: true, JobID: jobID, Text: fmt.Sprintf("Failed to reset repository: %s", err.Error())}, nil
 	}
 
-	prompt := fmt.Sprintf("## Task\n\n%s\n\n## Approved Plan\n\n%s", state.Task, state.PlanContent)
+	prompt := fmt.Sprintf("## Task\n\n%s\n\n## Approved Plan\n\n%s", task, planContent)
 
 	log.Printf("orchestrator: starting implementation session for job %s", jobID)
-	o.hub.Emit(jobID, EventToolStarted, map[string]any{"tool_name": "implement_changes", "input": state.Task})
+	o.hub.Emit(jobID, EventToolStarted, map[string]any{"tool_name": "implement_changes", "input": task})
 	implStart := time.Now()
 
 	sr, err := RunSession(jobCtx, o.claudeCodeToken, o.hub, jobID, SessionOpts{
@@ -260,15 +269,15 @@ func (o *Orchestrator) HandleApproval(ctx context.Context, jobID string) (Orches
 	}
 
 	// Create PR.
-	log.Printf("orchestrator: creating pull request for %s", state.Repo)
-	branch := taskBranchName(state.Task)
-	title := state.Task
+	log.Printf("orchestrator: creating pull request for %s", repo)
+	branch := taskBranchName(task)
+	title := task
 	if len(title) > 72 {
 		title = title[:72]
 	}
-	o.hub.Emit(jobID, EventToolStarted, map[string]any{"tool_name": "create_pull_request", "input": state.Repo})
+	o.hub.Emit(jobID, EventToolStarted, map[string]any{"tool_name": "create_pull_request", "input": repo})
 	prStart := time.Now()
-	prURL, err := CreatePullRequest(jobCtx, o.githubOwner, o.githubToken, state.Repo, title, branch, sr.ResultText)
+	prURL, err := CreatePullRequest(jobCtx, o.githubOwner, o.githubToken, repo, title, branch, sr.ResultText)
 	prDurationMs := time.Since(prStart).Milliseconds()
 	if err != nil {
 		o.hub.Emit(jobID, EventToolCompleted, map[string]any{
@@ -303,7 +312,9 @@ func (o *Orchestrator) processSessionResult(ctx context.Context, jobID string, s
 
 	// Update session ID.
 	if sr.SessionID != "" {
+		state.mu.Lock()
 		state.SessionID = sr.SessionID
+		state.mu.Unlock()
 	}
 
 	if sr.IsError {
@@ -328,9 +339,11 @@ func (o *Orchestrator) processSessionResult(ctx context.Context, jobID string, s
 			planContent = sr.ResultText
 		}
 
-		o.hub.SetPhase(jobID, PhaseAwaitingApproval)
+		state.mu.Lock()
 		state.PlanFilePath = sr.PlanFilePath
 		state.PlanContent = planContent
+		state.mu.Unlock()
+		o.hub.SetPhase(jobID, PhaseAwaitingApproval)
 
 		o.hub.Emit(jobID, EventPlanGenerated, map[string]any{"plan": planContent})
 
@@ -347,8 +360,10 @@ func (o *Orchestrator) processSessionResult(ctx context.Context, jobID string, s
 
 	// Fallback: no explicit signal — use ResultText as plan.
 	if sr.ResultText != "" {
-		o.hub.SetPhase(jobID, PhaseAwaitingApproval)
+		state.mu.Lock()
 		state.PlanContent = sr.ResultText
+		state.mu.Unlock()
+		o.hub.SetPhase(jobID, PhaseAwaitingApproval)
 
 		o.hub.Emit(jobID, EventPlanGenerated, map[string]any{"plan": sr.ResultText})
 

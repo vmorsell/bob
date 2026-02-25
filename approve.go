@@ -43,14 +43,20 @@ func (a *Approver) Approve(ctx context.Context, jobID, channel, threadTS, approv
 
 	// Update the plan message: remove button, show "Approved by ...".
 	state, ok := a.hub.GetJobState(jobID)
-	if ok && state.PlanMsgTS != "" {
-		blocks := formatApprovedPlanBlocks(state.PlanContent, approvedBy)
-		_, _, _, err := a.slackClient.UpdateMessage(channel, state.PlanMsgTS,
-			slack.MsgOptionText(formatPlanMessage(state.PlanContent), false),
-			slack.MsgOptionBlocks(blocks...),
-		)
-		if err != nil {
-			log.Printf("approve: failed to update plan message: %v", err)
+	if ok {
+		state.mu.Lock()
+		planMsgTS := state.PlanMsgTS
+		planContent := state.PlanContent
+		state.mu.Unlock()
+		if planMsgTS != "" {
+			blocks := formatApprovedPlanBlocks(planContent, approvedBy)
+			_, _, _, err := a.slackClient.UpdateMessage(channel, planMsgTS,
+				slack.MsgOptionText(formatPlanMessage(planContent), false),
+				slack.MsgOptionBlocks(blocks...),
+			)
+			if err != nil {
+				log.Printf("approve: failed to update plan message: %v", err)
+			}
 		}
 	}
 

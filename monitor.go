@@ -67,7 +67,8 @@ const (
 
 // JobState holds the full state for an active job.
 type JobState struct {
-	SessionID    string   // planning session ID (for --resume within planning)
+	mu           sync.Mutex // protects all fields below
+	SessionID    string     // planning session ID (for --resume within planning)
 	Repo         string
 	Task         string
 	Phase        JobPhase
@@ -204,6 +205,8 @@ func (h *Hub) SetPhase(jobID string, phase JobPhase) {
 	if !ok {
 		return
 	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
 	state.Phase = phase
 	h.Emit(jobID, EventPhaseChanged, map[string]any{"phase": string(phase)})
 }
@@ -218,6 +221,8 @@ func (h *Hub) TryStartImplementation(jobID string) bool {
 	if !ok {
 		return false
 	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
 	// Only allow transition from awaiting_approval.
 	if state.Phase != PhaseAwaitingApproval {
 		return false
@@ -236,6 +241,8 @@ func (h *Hub) ClearImplementation(jobID string) {
 	if !ok {
 		return
 	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
 	if state.Phase == PhaseImplementing {
 		state.Phase = PhaseAwaitingApproval
 		h.Emit(jobID, EventPhaseChanged, map[string]any{"phase": string(PhaseAwaitingApproval)})
