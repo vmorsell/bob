@@ -10,7 +10,17 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
+
+// sanitizeGitOutput removes embedded credentials from git command output.
+func sanitizeGitOutput(output []byte, token string) string {
+	s := string(output)
+	if token != "" {
+		s = strings.ReplaceAll(s, token, "[REDACTED]")
+	}
+	return s
+}
 
 type repo struct {
 	Name        string `json:"name"`
@@ -68,7 +78,7 @@ func CloneRepo(ctx context.Context, owner, token, repoName string) error {
 	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", cloneURL, dest)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("git clone failed: %s: %w", output, err)
+		return fmt.Errorf("git clone failed: %s: %w", sanitizeGitOutput(output, token), err)
 	}
 	return nil
 }
@@ -118,7 +128,7 @@ func CreatePullRequest(ctx context.Context, owner, token, repoName, title, branc
 	pushCmd := exec.CommandContext(ctx, "git", "push", pushURL, branch)
 	pushCmd.Dir = repoDir
 	if out, err := pushCmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("push failed: %s: %w", out, err)
+		return "", fmt.Errorf("push failed: %s: %w", sanitizeGitOutput(out, token), err)
 	}
 
 	// Create PR via GitHub API.
