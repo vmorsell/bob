@@ -23,7 +23,7 @@ Two-service Docker Compose setup:
 - **bob** — Go HTTP server on `:8080` handling Slack webhooks
 - **cloudflared** — Cloudflare tunnel routing your tunnel domain → `http://bob:8080`
 
-A named `workspace` volume is mounted at `/workspace` for persistent repo clones across restarts.
+A named `workspace` volume is mounted at `/workspace` for persistent repo clones across restarts. Bob runs as non-root (uid 1000 `worker`) via `USER worker` in the Dockerfile — no entrypoint wrapper or privilege dropping needed.
 
 Go code is organized by concern:
 
@@ -32,9 +32,9 @@ Go code is organized by concern:
 - `approve.go` — `Approver`: shared approval path for both Slack button and web UI; uses `Hub.TryStartImplementation` phase CAS guard; calls `orchestrator.HandleApproval` directly using `JobState`
 - `llm.go` — `Message`/`Role` types (used by intent parser and slack thread parsing)
 - `intent.go` — `ParseIntent`: single Claude Haiku call that extracts `{Repo, Task, Question}` from a Slack conversation (first mention only; no plan state detection)
-- `orchestrator.go` — `Orchestrator` with three entry points: `HandleNewRequest` (parse intent → plan), `HandleReply` (resume planning session), `HandleApproval` (fresh execution session); `resetRepo`, `readPlanFile`, `formatPlanBlocks`, `formatApprovedPlanBlocks`, `taskBranchName`
-- `git.go` — Plain functions: `FindRepo` (GitHub REST API), `CloneRepo` (shallow clone to `/workspace`), `CreatePullRequest` (commit + push + GitHub API)
-- `claudecode.go` — `RunSession` (unified CLI executor with `--resume` and `--permission-mode` support), `resetRepo`, `claudeStreamParser` (detects `system/init` session ID, `AskUserQuestion`, `ExitPlanMode`, `Write` to `.claude/plans/`, result events); system prompt constants `planSystemPrompt` and `executeSystemPrompt`
+- `orchestrator.go` — `Orchestrator` with three entry points: `HandleNewRequest` (parse intent → plan), `HandleReply` (resume planning session), `HandleApproval` (fresh execution session); `readPlanFile`, `formatPlanBlocks`, `formatApprovedPlanBlocks`, `taskBranchName`
+- `git.go` — Plain functions: `FindRepo` (GitHub REST API), `EnsureBaseClone` (idempotent shallow clone + fetch), `CreateWorktree`/`RemoveWorktree`/`ResetWorktree` (per-job isolation), `CreatePullRequest` (commit + push + GitHub API)
+- `claudecode.go` — `RunSession` (unified CLI executor with `--resume` and `--permission-mode` support), `claudeStreamParser` (detects `system/init` session ID, `AskUserQuestion`, `ExitPlanMode`, `Write` to `.claude/plans/`, result events); system prompt constants `planSystemPrompt` and `executeSystemPrompt`
 - `util.go` — `truncate` helper
 - `notify.go` — Context key helpers for channel, threadTS, jobID, hub, mentionTS
 - `monitor.go` — `Hub` (SSE fan-out + JSONL persistence), `JobPhase`/`JobState` types, event types, REST handlers (`/api/jobs`, `/api/jobs/{id}`), SSE handler (`/events`), dark-terminal web UI
@@ -43,30 +43,36 @@ Go code is organized by concern:
 
 The first Slack mention in a thread triggers a single Claude Haiku call (`ParseIntent`) that returns `{Repo, Task, Question}`. Subsequent mentions in the same thread use `--resume` to continue the planning session without re-parsing intent.
 
+**Workspace layout:** `/workspace/<repoName>/` is a persistent base clone (never used directly by jobs). Per-job worktrees live at `/workspace/<repoName>/worktrees/<jobID>/`, each on branch `job/<jobID>`. This gives full concurrent isolation with minimal disk overhead.
+
 **`HandleNewRequest` (first mention):**
 1. `ParseIntent` → repo + task (or clarifying question)
 2. `FindRepo` — verify repo exists via GitHub API
 3. `createJob` — register job with `Hub`, set phase=planning
-4. `CloneRepo` + `resetRepo` — shallow clone to `/workspace`, reset to clean main
-5. `RunSession(plan mode, new session)` — Claude Code CLI with `--permission-mode plan` and `planSystemPrompt`
-6. Inspect `SessionResult`:
+4. `EnsureBaseClone` — idempotent shallow clone + `git fetch` latest main
+5. `CreateWorktree` — `git worktree add -b job/<jobID> <path> FETCH_HEAD`
+6. Store `RepoDir` (worktree) and `BaseDir` (base clone) in `JobState`
+7. `RunSession(plan mode, new session)` — Claude Code CLI with `--permission-mode plan` and `planSystemPrompt`
+8. Inspect `SessionResult`:
    - `Question` → phase=awaiting_question, return question to Slack
    - `PlanExited` → read plan file, cache in `JobState.PlanContent`, phase=awaiting_approval, return plan blocks
-   - `IsError` → close job, return error
+   - `IsError` → close job (removes worktree), return error
    - Fallback → use `ResultText` as plan
 
 **`HandleReply` (subsequent mentions with active job):**
-1. Get `JobState` (has SessionID, Repo)
-2. `RunSession(plan mode, --resume <sessionID>, prompt=userText)` — NO git reset, NO system prompt (already in session context)
+1. Get `JobState` (has SessionID, RepoDir)
+2. `RunSession(plan mode, --resume <sessionID>, prompt=userText)` — uses worktree path, NO system prompt (already in session context)
 3. Inspect result same as above, update phase and SessionID
 
 **`HandleApproval` (plan approved via button, text, or web UI):**
 1. Get `JobState`, `TryStartImplementation` phase CAS guard
 2. Phase=implementing
-3. `resetRepo` — clean state from main (matching what the plan was based on)
+3. `ResetWorktree` — fetch latest main on base, resolve `FETCH_HEAD` to SHA, `git reset --hard <sha>` + `git clean -fd` in worktree
 4. **Fresh session** (NO --resume): `RunSession(acceptEdits mode, executeSystemPrompt, prompt=task+planContent)`
-5. On success: `CreatePullRequest(...)`, close job, return PR URL
+5. On success: `CreatePullRequest(repoDir=worktree, ...)`, close job (removes worktree), return PR URL
 6. On error: `ClearImplementation`, return error
+
+**`closeJob`** removes the worktree (`git worktree remove --force`) and deletes the `job/<jobID>` branch.
 
 **`--resume` is used only within planning.** When transitioning to execution, a fresh session starts with the plan as prompt context. The plan must be self-contained (file paths, code snippets, function signatures) so implementation doesn't require re-exploration.
 
@@ -82,6 +88,8 @@ JobState {
     PlanFilePath // Write to .claude/plans/ detected
     PlanContent  // cached plan text
     Channel, ThreadTS, PlanMsgTS  // Slack coordinates
+    RepoDir      // worktree path (/workspace/<repo>/worktrees/<jobID>)
+    BaseDir      // base clone path (/workspace/<repo>)
 }
 ```
 

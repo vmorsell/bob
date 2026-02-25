@@ -112,39 +112,113 @@ func FindRepo(ctx context.Context, token, owner, name string) (repo, error) {
 	return r, nil
 }
 
-// CloneRepo shallow-clones a GitHub repository to /workspace/{repoName}.
-// No-ops if the directory already exists.
-func CloneRepo(ctx context.Context, owner, token, repoName string) error {
+// EnsureBaseClone ensures a shallow base clone exists at /workspace/<repoName>
+// and fetches the latest main. The base clone is never used directly by jobs;
+// worktrees are created from it instead.
+func EnsureBaseClone(ctx context.Context, owner, token, repoName string) (baseDir string, err error) {
 	repoName = filepath.Base(repoName)
-	dest := filepath.Join("/workspace", repoName)
+	baseDir = filepath.Join("/workspace", repoName)
+	fetchURL := fmt.Sprintf("https://x-access-token:%s@github.com/%s/%s.git", token, owner, repoName)
 
-	if _, err := os.Stat(dest); err == nil {
-		return nil // already cloned
+	if _, err := os.Stat(baseDir); os.IsNotExist(err) {
+		cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", fetchURL, baseDir)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return "", fmt.Errorf("git clone failed: %s: %w", sanitizeGitOutput(output, token), err)
+		}
+
+		// Remove token from stored remote URL so Claude Code can't read it from .git/config.
+		cleanURL := fmt.Sprintf("https://github.com/%s/%s.git", owner, repoName)
+		setURL := exec.CommandContext(ctx, "git", "remote", "set-url", "origin", cleanURL)
+		setURL.Dir = baseDir
+		if out, err := setURL.CombinedOutput(); err != nil {
+			return "", fmt.Errorf("set-url failed: %s: %w", out, err)
+		}
 	}
 
-	cloneURL := fmt.Sprintf("https://x-access-token:%s@github.com/%s/%s.git", token, owner, repoName)
-	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", cloneURL, dest)
-	output, err := cmd.CombinedOutput()
+	// Fetch latest main so FETCH_HEAD is current.
+	fetch := exec.CommandContext(ctx, "git", "fetch", fetchURL, "main")
+	fetch.Dir = baseDir
+	if out, err := fetch.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("fetch main failed: %s: %w", sanitizeGitOutput(out, token), err)
+	}
+	return baseDir, nil
+}
+
+// CreateWorktree creates a git worktree for a job from FETCH_HEAD.
+// Returns the worktree path.
+func CreateWorktree(ctx context.Context, baseDir, jobID string) (string, error) {
+	wtPath := filepath.Join(baseDir, "worktrees", jobID)
+	branch := "job/" + jobID
+
+	cmd := exec.CommandContext(ctx, "git", "worktree", "add", "-b", branch, wtPath, "FETCH_HEAD")
+	cmd.Dir = baseDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("worktree add failed: %s: %w", out, err)
+	}
+	return wtPath, nil
+}
+
+// RemoveWorktree removes a job's worktree and its branch.
+func RemoveWorktree(ctx context.Context, baseDir, wtPath, jobID string) {
+	rm := exec.CommandContext(ctx, "git", "worktree", "remove", "--force", wtPath)
+	rm.Dir = baseDir
+	if out, err := rm.CombinedOutput(); err != nil {
+		log.Printf("worktree remove failed (non-fatal): %s: %v", out, err)
+	}
+
+	prune := exec.CommandContext(ctx, "git", "worktree", "prune")
+	prune.Dir = baseDir
+	prune.CombinedOutput() // best-effort
+
+	branch := "job/" + jobID
+	del := exec.CommandContext(ctx, "git", "branch", "-D", branch)
+	del.Dir = baseDir
+	if out, err := del.CombinedOutput(); err != nil {
+		log.Printf("branch delete failed (non-fatal): %s: %v", out, err)
+	}
+}
+
+// ResetWorktree fetches latest main and hard-resets the worktree, giving a
+// clean starting point for implementation. Fetch runs on the base clone,
+// FETCH_HEAD is resolved to a SHA there, and the SHA is used for the reset
+// in the worktree (avoids per-worktree FETCH_HEAD portability issues).
+func ResetWorktree(ctx context.Context, baseDir, wtPath, token, owner, repoName string) error {
+	fetchURL := fmt.Sprintf("https://x-access-token:%s@github.com/%s/%s.git", token, owner, repoName)
+	fetch := exec.CommandContext(ctx, "git", "fetch", fetchURL, "main")
+	fetch.Dir = baseDir
+	if out, err := fetch.CombinedOutput(); err != nil {
+		return fmt.Errorf("fetch main failed: %s: %w", sanitizeGitOutput(out, token), err)
+	}
+
+	// Resolve FETCH_HEAD to a commit hash on the base clone where it's reliable.
+	revParse := exec.CommandContext(ctx, "git", "rev-parse", "FETCH_HEAD")
+	revParse.Dir = baseDir
+	hashOut, err := revParse.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("git clone failed: %s: %w", sanitizeGitOutput(output, token), err)
+		return fmt.Errorf("rev-parse FETCH_HEAD failed: %s: %w", hashOut, err)
+	}
+	commit := strings.TrimSpace(string(hashOut))
+
+	reset := exec.CommandContext(ctx, "git", "reset", "--hard", commit)
+	reset.Dir = wtPath
+	if out, err := reset.CombinedOutput(); err != nil {
+		return fmt.Errorf("reset worktree failed: %s: %w", out, err)
 	}
 
-	// Remove token from stored remote URL so Claude Code can't read it from .git/config.
-	cleanURL := fmt.Sprintf("https://github.com/%s/%s.git", owner, repoName)
-	setURL := exec.CommandContext(ctx, "git", "remote", "set-url", "origin", cleanURL)
-	setURL.Dir = dest
-	if out, err := setURL.CombinedOutput(); err != nil {
-		return fmt.Errorf("set-url failed: %s: %w", out, err)
+	clean := exec.CommandContext(ctx, "git", "clean", "-fd")
+	clean.Dir = wtPath
+	if out, err := clean.CombinedOutput(); err != nil {
+		return fmt.Errorf("clean worktree failed: %s: %w", out, err)
 	}
-
 	return nil
 }
 
 // CreatePullRequest commits all changes, pushes a new branch, and opens a PR.
+// repoDir is the working directory (typically a worktree path).
 // Returns the PR HTML URL.
-func CreatePullRequest(ctx context.Context, owner, token, repoName, title, branch, body string) (string, error) {
+func CreatePullRequest(ctx context.Context, owner, token, repoName, repoDir, title, branch, body string) (string, error) {
 	repoName = filepath.Base(repoName)
-	repoDir := filepath.Join("/workspace", repoName)
 
 	// Configure git user.
 	for _, args := range [][]string{

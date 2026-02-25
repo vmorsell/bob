@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -42,7 +41,7 @@ When done, output a brief summary of what was changed.`
 
 // SessionOpts configures a RunSession call.
 type SessionOpts struct {
-	RepoDir        string // /workspace/<repo>
+	RepoDir        string // working directory (worktree path for jobs)
 	Prompt         string // the -p argument
 	SystemPrompt   string // prepended to prompt (planning or execution instructions)
 	SessionID      string // --resume <id>; empty = new session
@@ -57,34 +56,6 @@ type SessionResult struct {
 	PlanExited   bool   // ExitPlanMode tool_use detected
 	ResultText   string // from result event
 	IsError      bool
-}
-
-// resetRepo resets a cloned repo to clean main state.
-// fetchURL is the token-bearing URL used to fetch latest main (since the stored
-// origin URL no longer contains credentials).
-func resetRepo(ctx context.Context, repoDir, fetchURL, token string) error {
-	chownRoot := exec.CommandContext(ctx, "chown", "-R", "0:0", repoDir)
-	if out, err := chownRoot.CombinedOutput(); err != nil {
-		return fmt.Errorf("chown to root failed: %s: %w", out, err)
-	}
-	steps := []struct {
-		args []string
-		desc string
-	}{
-		{[]string{"checkout", "."}, "discard changes"},
-		{[]string{"clean", "-fd"}, "clean untracked"},
-		{[]string{"checkout", "main"}, "checkout main"},
-		{[]string{"fetch", fetchURL, "main"}, "fetch latest"},
-		{[]string{"reset", "--hard", "FETCH_HEAD"}, "reset to latest"},
-	}
-	for _, s := range steps {
-		cmd := exec.CommandContext(ctx, "git", s.args...)
-		cmd.Dir = repoDir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("%s failed: %s: %w", s.desc, sanitizeGitOutput(out, token), err)
-		}
-	}
-	return nil
 }
 
 // RunSession executes a Claude Code CLI session.
@@ -103,12 +74,6 @@ func RunSession(ctx context.Context, claudeCodeToken string, hub *Hub, jobID str
 	cliCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
 
-	// Ensure worker owns the repo for Claude CLI.
-	chown := exec.CommandContext(cliCtx, "chown", "-R", "1000:1000", opts.RepoDir)
-	if out, err := chown.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("chown failed: %s: %w", out, err)
-	}
-
 	args := []string{
 		"-p", prompt,
 		"--output-format", "stream-json",
@@ -126,21 +91,12 @@ func RunSession(ctx context.Context, claudeCodeToken string, hub *Hub, jobID str
 	cmd := exec.CommandContext(cliCtx, "claude", args...)
 	cmd.Dir = opts.RepoDir
 	cmd.Env = append(os.Environ(), "CLAUDE_CODE_OAUTH_TOKEN="+claudeCodeToken, "HOME=/home/worker")
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Credential: &syscall.Credential{Uid: 1000, Gid: 1000},
-	}
 
 	sp := newClaudeStreamParser(hub, jobID)
 	sp.cancelOnQuestion = cancel
 	cmd.Stdout = sp
 	cmd.Stderr = sp
 	runErr := cmd.Run()
-
-	// Chown back to root so subsequent git commands work.
-	chownBack := exec.CommandContext(ctx, "chown", "-R", "0:0", opts.RepoDir)
-	if out, chownErr := chownBack.CombinedOutput(); chownErr != nil {
-		return nil, fmt.Errorf("chown back failed: %s: %w", out, chownErr)
-	}
 
 	// If the process was killed because AskUserQuestion was detected,
 	// the question was captured — return it as a successful result.

@@ -121,13 +121,13 @@ func (o *Orchestrator) HandleNewRequest(ctx context.Context, messages []Message,
 	})
 
 	startTime := time.Now()
-	repoDir := filepath.Join("/workspace", filepath.Base(intent.Repo))
 
-	// Clone repo.
-	log.Printf("orchestrator: cloning %s for planning", intent.Repo)
+	// Ensure base clone exists and fetch latest main.
+	log.Printf("orchestrator: ensuring base clone for %s", intent.Repo)
 	o.hub.Emit(jobID, EventToolStarted, map[string]any{"tool_name": "clone_repo", "input": intent.Repo})
 	cloneStart := time.Now()
-	if err := CloneRepo(jobCtx, o.githubOwner, o.githubToken, intent.Repo); err != nil {
+	baseDir, err := EnsureBaseClone(jobCtx, o.githubOwner, o.githubToken, intent.Repo)
+	if err != nil {
 		o.hub.Emit(jobID, EventToolCompleted, map[string]any{
 			"tool_name": "clone_repo", "is_error": true,
 			"result_preview": err.Error(), "duration_ms": time.Since(cloneStart).Milliseconds(),
@@ -139,17 +139,24 @@ func (o *Orchestrator) HandleNewRequest(ctx context.Context, messages []Message,
 	}
 	o.hub.Emit(jobID, EventToolCompleted, map[string]any{
 		"tool_name": "clone_repo", "is_error": false,
-		"result_preview": "cloned successfully", "duration_ms": time.Since(cloneStart).Milliseconds(),
+		"result_preview": "base clone ready", "duration_ms": time.Since(cloneStart).Milliseconds(),
 	})
 
-	// Reset repo to clean state.
-	fetchURL := fmt.Sprintf("https://x-access-token:%s@github.com/%s/%s.git", o.githubToken, o.githubOwner, filepath.Base(intent.Repo))
-	if err := resetRepo(jobCtx, repoDir, fetchURL, o.githubToken); err != nil {
+	// Create per-job worktree from latest main.
+	repoDir, err := CreateWorktree(jobCtx, baseDir, jobID)
+	if err != nil {
 		o.closeJob(ctx, jobID, EventJobError, map[string]any{
 			"error": err.Error(), "total_duration_ms": time.Since(startTime).Milliseconds(), "total_cost_usd": intentCost,
 		})
-		return OrchestratorResult{IsJob: true, JobID: jobID, Text: fmt.Sprintf("Failed to reset repository: %s", err.Error())}, nil
+		return OrchestratorResult{IsJob: true, JobID: jobID, Text: fmt.Sprintf("Failed to create worktree: %s", err.Error())}, nil
 	}
+
+	// Store paths in job state.
+	state, _ := o.hub.GetJobState(jobID)
+	state.mu.Lock()
+	state.RepoDir = repoDir
+	state.BaseDir = baseDir
+	state.mu.Unlock()
 
 	// Run planning session.
 	log.Printf("orchestrator: starting planning session for %s", intent.Repo)
@@ -194,7 +201,9 @@ func (o *Orchestrator) HandleReply(ctx context.Context, jobID, userText string) 
 		o.hub.Emit(jobID, EventPlanSuperseded, nil)
 	}
 
-	repoDir := filepath.Join("/workspace", filepath.Base(state.Repo))
+	state.mu.Lock()
+	repoDir := state.RepoDir
+	state.mu.Unlock()
 
 	jobCtx := WithJobID(ctx, jobID)
 	jobCtx = WithHub(jobCtx, o.hub)
@@ -245,20 +254,19 @@ func (o *Orchestrator) HandleApproval(ctx context.Context, jobID string) (Orches
 	repo := state.Repo
 	task := state.Task
 	planContent := state.PlanContent
+	repoDir := state.RepoDir
+	baseDir := state.BaseDir
 	state.mu.Unlock()
-
-	repoDir := filepath.Join("/workspace", filepath.Base(repo))
 
 	jobCtx := WithJobID(ctx, jobID)
 	jobCtx = WithHub(jobCtx, o.hub)
 
 	startTime := time.Now()
 
-	// Reset repo to clean main before implementation.
-	fetchURL := fmt.Sprintf("https://x-access-token:%s@github.com/%s/%s.git", o.githubToken, o.githubOwner, filepath.Base(repo))
-	if err := resetRepo(jobCtx, repoDir, fetchURL, o.githubToken); err != nil {
+	// Reset worktree to latest main before implementation.
+	if err := ResetWorktree(jobCtx, baseDir, repoDir, o.githubToken, o.githubOwner, filepath.Base(repo)); err != nil {
 		o.hub.ClearImplementation(jobID)
-		return OrchestratorResult{IsJob: true, JobID: jobID, Text: fmt.Sprintf("Failed to reset repository: %s", err.Error())}, nil
+		return OrchestratorResult{IsJob: true, JobID: jobID, Text: fmt.Sprintf("Failed to reset worktree: %s", err.Error())}, nil
 	}
 
 	prompt := fmt.Sprintf("## Task\n\n%s\n\n## Approved Plan\n\n%s", task, planContent)
@@ -308,7 +316,7 @@ func (o *Orchestrator) HandleApproval(ctx context.Context, jobID string) (Orches
 	}
 	o.hub.Emit(jobID, EventToolStarted, map[string]any{"tool_name": "create_pull_request", "input": repo})
 	prStart := time.Now()
-	prURL, err := CreatePullRequest(jobCtx, o.githubOwner, o.githubToken, repo, title, branch, sr.ResultText)
+	prURL, err := CreatePullRequest(jobCtx, o.githubOwner, o.githubToken, repo, repoDir, title, branch, sr.ResultText)
 	prDurationMs := time.Since(prStart).Milliseconds()
 	if err != nil {
 		o.hub.Emit(jobID, EventToolCompleted, map[string]any{
@@ -460,9 +468,21 @@ func (o *Orchestrator) createJob(intent IntentResult, channel, threadTS string) 
 	return jobID
 }
 
-// closeJob emits a terminal event and unregisters the thread→job mapping.
+// closeJob emits a terminal event, cleans up the worktree, and unregisters the thread→job mapping.
 func (o *Orchestrator) closeJob(ctx context.Context, jobID string, evtType EventType, data map[string]any) {
 	o.hub.Emit(jobID, evtType, data)
+
+	// Clean up worktree if one was created.
+	if state, ok := o.hub.GetJobState(jobID); ok {
+		state.mu.Lock()
+		baseDir := state.BaseDir
+		repoDir := state.RepoDir
+		state.mu.Unlock()
+		if baseDir != "" && repoDir != "" {
+			RemoveWorktree(ctx, baseDir, repoDir, jobID)
+		}
+	}
+
 	channel, _ := ctx.Value(ctxKeyChannel).(string)
 	threadTS, _ := ctx.Value(ctxKeyThreadTS).(string)
 	o.hub.UnregisterThreadJob(channel, threadTS)

@@ -18,4 +18,6 @@ RUN apk add --no-cache ca-certificates git go nodejs npm \
     && npm install -g @anthropic-ai/claude-code \
     && adduser -D -u 1000 worker
 COPY --from=build /bob /bob
+RUN mkdir -p /workspace && chown worker:worker /workspace
+USER worker
 ENTRYPOINT ["/bob"]

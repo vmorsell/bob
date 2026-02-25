@@ -77,6 +77,8 @@ type JobState struct {
 	Channel      string
 	ThreadTS     string
 	PlanMsgTS    string
+	RepoDir      string // worktree path (/workspace/<repo>/worktrees/<jobID>)
+	BaseDir      string // base clone path (/workspace/<repo>)
 }
 
 // Hub manages SSE clients, persists events to JSONL files, and fans out events.
