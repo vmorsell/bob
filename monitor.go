@@ -83,12 +83,13 @@ type JobState struct {
 
 // Hub manages SSE clients, persists events to JSONL files, and fans out events.
 type Hub struct {
-	mu        sync.RWMutex
-	clients   map[*sseClient]struct{}
-	broadcast chan Event
-	seq       uint64
-	dataDir   string
-	jobFiles  map[string]*os.File
+	mu            sync.RWMutex
+	clients       map[*sseClient]struct{}
+	maxSSEClients int
+	broadcast     chan Event
+	seq           uint64
+	dataDir       string
+	jobFiles      map[string]*os.File
 
 	threadMu   sync.Mutex
 	threadJobs map[string]string // "channel:threadTS" → jobID
@@ -106,12 +107,13 @@ func NewHub(dataDir string) *Hub {
 		log.Printf("hub: failed to create data dir %s: %v", dataDir, err)
 	}
 	h := &Hub{
-		clients:      make(map[*sseClient]struct{}),
-		broadcast:    make(chan Event, 4096),
-		dataDir:      dataDir,
-		jobFiles:     make(map[string]*os.File),
-		threadJobs:   make(map[string]string),
-		channelRepos: make(map[string]string),
+		clients:       make(map[*sseClient]struct{}),
+		maxSSEClients: 50,
+		broadcast:     make(chan Event, 4096),
+		dataDir:       dataDir,
+		jobFiles:      make(map[string]*os.File),
+		threadJobs:    make(map[string]string),
+		channelRepos:  make(map[string]string),
 	}
 	h.loadChannelRepos()
 	go h.run()
@@ -362,10 +364,14 @@ func (h *Hub) openJobFile(jobID string) (*os.File, error) {
 	return f, nil
 }
 
-func (h *Hub) add(c *sseClient) {
+func (h *Hub) add(c *sseClient) bool {
 	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.clients) >= h.maxSSEClients {
+		return false
+	}
 	h.clients[c] = struct{}{}
-	h.mu.Unlock()
+	return true
 }
 
 func (h *Hub) remove(c *sseClient) {
@@ -392,7 +398,10 @@ func (h *Hub) ServeSSE(w http.ResponseWriter, r *http.Request) {
 		jobID: r.URL.Query().Get("job"),
 		send:  make(chan []byte, 64),
 	}
-	h.add(c)
+	if !h.add(c) {
+		http.Error(w, "too many connections", http.StatusServiceUnavailable)
+		return
+	}
 	defer h.remove(c)
 
 	for {
