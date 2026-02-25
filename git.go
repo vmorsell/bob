@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -20,6 +21,53 @@ func sanitizeGitOutput(output []byte, token string) string {
 		s = strings.ReplaceAll(s, token, "[REDACTED]")
 	}
 	return s
+}
+
+// isSecretFile returns true if a filename looks like it contains secrets.
+func isSecretFile(name string) bool {
+	lower := strings.ToLower(filepath.Base(name))
+	for _, pat := range []string{".env", ".pem", ".key", ".secret", "credentials", "service-account"} {
+		if strings.Contains(lower, pat) {
+			return true
+		}
+	}
+	return false
+}
+
+// changedFiles returns the list of modified and untracked files in repoDir,
+// excluding files that look like they contain secrets.
+func changedFiles(ctx context.Context, repoDir string) ([]string, error) {
+	// Modified/deleted files.
+	diffCmd := exec.CommandContext(ctx, "git", "diff", "--name-only")
+	diffCmd.Dir = repoDir
+	diffOut, err := diffCmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("git diff failed: %s: %w", diffOut, err)
+	}
+
+	// New untracked files (respects .gitignore).
+	lsCmd := exec.CommandContext(ctx, "git", "ls-files", "--others", "--exclude-standard")
+	lsCmd.Dir = repoDir
+	lsOut, err := lsCmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("git ls-files failed: %s: %w", lsOut, err)
+	}
+
+	seen := make(map[string]bool)
+	var files []string
+	for _, line := range strings.Split(string(diffOut)+"\n"+string(lsOut), "\n") {
+		f := strings.TrimSpace(line)
+		if f == "" || seen[f] {
+			continue
+		}
+		seen[f] = true
+		if isSecretFile(f) {
+			log.Printf("WARNING: skipping potentially sensitive file: %s", f)
+			continue
+		}
+		files = append(files, f)
+	}
+	return files, nil
 }
 
 type repo struct {
@@ -101,21 +149,35 @@ func CreatePullRequest(ctx context.Context, owner, token, repoName, title, branc
 		}
 	}
 
-	// Create and checkout branch, stage, commit.
-	gitSteps := []struct {
-		args []string
-		desc string
-	}{
-		{[]string{"checkout", "-b", branch}, "create branch"},
-		{[]string{"add", "-A"}, "stage changes"},
-		{[]string{"commit", "-m", title}, "commit"},
+	// Create branch.
+	checkoutCmd := exec.CommandContext(ctx, "git", "checkout", "-b", branch)
+	checkoutCmd.Dir = repoDir
+	if out, err := checkoutCmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("create branch failed: %s: %w", out, err)
 	}
-	for _, step := range gitSteps {
-		cmd := exec.CommandContext(ctx, "git", step.args...)
-		cmd.Dir = repoDir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return "", fmt.Errorf("%s failed: %s: %w", step.desc, out, err)
-		}
+
+	// Collect changed and untracked files, filtering out secrets.
+	filesToAdd, err := changedFiles(ctx, repoDir)
+	if err != nil {
+		return "", err
+	}
+	if len(filesToAdd) == 0 {
+		return "", fmt.Errorf("no files to commit")
+	}
+
+	// Stage only the approved files.
+	addArgs := append([]string{"add", "--"}, filesToAdd...)
+	addCmd := exec.CommandContext(ctx, "git", addArgs...)
+	addCmd.Dir = repoDir
+	if out, err := addCmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("stage changes failed: %s: %w", out, err)
+	}
+
+	// Commit.
+	commitCmd := exec.CommandContext(ctx, "git", "commit", "-m", title)
+	commitCmd.Dir = repoDir
+	if out, err := commitCmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("commit failed: %s: %w", out, err)
 	}
 
 	// Unshallow if needed (ignore error if already full).

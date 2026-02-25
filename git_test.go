@@ -1,6 +1,8 @@
 package main
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestSanitizeGitOutput(t *testing.T) {
 	tests := []struct {
@@ -42,5 +44,40 @@ func TestSanitizeGitOutput(t *testing.T) {
 				t.Errorf("got %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestIsSecretFile(t *testing.T) {
+	blocked := []string{
+		".env",
+		".env.local",
+		".env.production",
+		"config/.env",
+		"server.pem",
+		"tls.key",
+		"credentials.json",
+		"service-account.json",
+		"service-account-prod.json",
+		"api.secret",
+		"nested/dir/.env",
+	}
+	for _, f := range blocked {
+		if !isSecretFile(f) {
+			t.Errorf("expected %q to be blocked", f)
+		}
+	}
+
+	allowed := []string{
+		"main.go",
+		"README.md",
+		"src/handler.ts",
+		"Dockerfile",
+		"go.sum",
+		"environment.go",
+	}
+	for _, f := range allowed {
+		if isSecretFile(f) {
+			t.Errorf("expected %q to be allowed", f)
+		}
 	}
 }
