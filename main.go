@@ -49,7 +49,12 @@ func main() {
 
 	hub := NewHub("/workspace/.bob")
 
-	orch := NewOrchestrator(anthropicKey, githubOwner, githubToken, claudeCodeToken, hub)
+	allowedRepos := parseAllowedRepos(os.Getenv("ALLOWED_REPOS"))
+	if allowedRepos != nil {
+		log.Printf("Repo allowlist active: %v", allowedRepos)
+	}
+
+	orch := NewOrchestrator(anthropicKey, githubOwner, githubToken, claudeCodeToken, hub, allowedRepos)
 
 	maxPerMinute := 15.0
 	if v := os.Getenv("MAX_INBOUND_MESSAGES_PER_MIN"); v != "" {

@@ -28,6 +28,10 @@ type OrchestratorResult struct {
 	JobID          string        // job ID (for storing plan msg TS)
 }
 
+// maxTaskLen is the maximum length of a task description extracted from intent parsing.
+// Prevents excessively long prompts from being injected.
+const maxTaskLen = 2000
+
 // Orchestrator drives the deterministic coding workflow.
 type Orchestrator struct {
 	anthropicKey    string
@@ -35,16 +39,18 @@ type Orchestrator struct {
 	githubToken     string
 	claudeCodeToken string
 	hub             *Hub
+	allowedRepos    map[string]bool
 }
 
 // NewOrchestrator creates a new Orchestrator.
-func NewOrchestrator(anthropicKey, githubOwner, githubToken, claudeCodeToken string, hub *Hub) *Orchestrator {
+func NewOrchestrator(anthropicKey, githubOwner, githubToken, claudeCodeToken string, hub *Hub, allowedRepos map[string]bool) *Orchestrator {
 	return &Orchestrator{
 		anthropicKey:    anthropicKey,
 		githubOwner:     githubOwner,
 		githubToken:     githubToken,
 		claudeCodeToken: claudeCodeToken,
 		hub:             hub,
+		allowedRepos:    allowedRepos,
 	}
 }
 
@@ -62,6 +68,21 @@ func (o *Orchestrator) HandleNewRequest(ctx context.Context, messages []Message,
 	}
 	if intent.Repo == "" || intent.Task == "" {
 		return OrchestratorResult{Text: "I couldn't determine the repository or task from your message. Could you please specify which repository you'd like me to work on and what changes you'd like me to make?"}, nil
+	}
+
+	// Validate repo name format (alphanumeric, hyphens, underscores, periods).
+	if !isValidRepoName(intent.Repo) {
+		return OrchestratorResult{Text: "The repository name I extracted doesn't look valid. Could you specify the repository name more clearly?"}, nil
+	}
+
+	// Truncate excessively long task descriptions.
+	if len(intent.Task) > maxTaskLen {
+		intent.Task = intent.Task[:maxTaskLen]
+	}
+
+	// Check repo allowlist if configured.
+	if len(o.allowedRepos) > 0 && !o.allowedRepos[intent.Repo] {
+		return OrchestratorResult{Text: fmt.Sprintf("Repository %q is not in the allowed list.", intent.Repo)}, nil
 	}
 
 	// Verify repo exists via GitHub API.
@@ -533,6 +554,40 @@ func formatSupersededPlanBlocks(plan, label string) []slack.Block {
 	)
 
 	return []slack.Block{planSection, divider, ctxBlock}
+}
+
+// isValidRepoName checks that a repo name contains only characters allowed by GitHub:
+// alphanumeric, hyphens, underscores, and periods.
+func isValidRepoName(name string) bool {
+	if name == "" || len(name) > 100 {
+		return false
+	}
+	for _, r := range name {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.') {
+			return false
+		}
+	}
+	return true
+}
+
+// parseAllowedRepos parses a comma-separated list of repo names into a set.
+// Returns nil if the input is empty (meaning no allowlist is enforced).
+func parseAllowedRepos(raw string) map[string]bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	m := make(map[string]bool)
+	for _, name := range strings.Split(raw, ",") {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			m[name] = true
+		}
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	return m
 }
 
 // taskBranchName generates a git-safe branch name from a task description.
