@@ -68,6 +68,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/webhooks/slack", NewSlackHandler(slackClient, signingSecret, orch, hub, botUserID, approver, bobURL, apiToken, maxPerMinute))
 	mux.Handle("/webhooks/slack/interactions", NewSlackInteractionHandler(slackClient, signingSecret, approver))
+	mux.Handle("/webhooks/slack/commands", NewSlashCommandHandler(signingSecret, hub))
 	mux.Handle("/events", requireAuthFunc(apiToken, hub.ServeSSE))
 	mux.Handle("/api/jobs/", requireAuth(apiToken, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// POST /api/jobs/{id}/approve — web UI approval endpoint.

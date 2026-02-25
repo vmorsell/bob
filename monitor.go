@@ -93,6 +93,9 @@ type Hub struct {
 
 	jobStates   sync.Map // jobID → *JobState
 	threadLocks sync.Map // "channel:threadTS" → *sync.Mutex
+
+	channelReposMu sync.RWMutex
+	channelRepos   map[string]string // channelID → repo name
 }
 
 // NewHub creates a Hub that persists events under dataDir and starts the run goroutine.
@@ -101,12 +104,14 @@ func NewHub(dataDir string) *Hub {
 		log.Printf("hub: failed to create data dir %s: %v", dataDir, err)
 	}
 	h := &Hub{
-		clients:    make(map[*sseClient]struct{}),
-		broadcast:  make(chan Event, 4096),
-		dataDir:    dataDir,
-		jobFiles:   make(map[string]*os.File),
-		threadJobs: make(map[string]string),
+		clients:      make(map[*sseClient]struct{}),
+		broadcast:    make(chan Event, 4096),
+		dataDir:      dataDir,
+		jobFiles:     make(map[string]*os.File),
+		threadJobs:   make(map[string]string),
+		channelRepos: make(map[string]string),
 	}
+	h.loadChannelRepos()
 	go h.run()
 	return h
 }
@@ -246,6 +251,68 @@ func (h *Hub) ClearImplementation(jobID string) {
 	if state.Phase == PhaseImplementing {
 		state.Phase = PhaseAwaitingApproval
 		h.Emit(jobID, EventPhaseChanged, map[string]any{"phase": string(PhaseAwaitingApproval)})
+	}
+}
+
+// SetChannelRepo sets the default repo for a Slack channel and persists to disk.
+func (h *Hub) SetChannelRepo(channel, repo string) {
+	h.channelReposMu.Lock()
+	h.channelRepos[channel] = repo
+	h.channelReposMu.Unlock()
+	h.saveChannelRepos()
+}
+
+// ClearChannelRepo removes the default repo for a Slack channel and persists to disk.
+func (h *Hub) ClearChannelRepo(channel string) {
+	h.channelReposMu.Lock()
+	delete(h.channelRepos, channel)
+	h.channelReposMu.Unlock()
+	h.saveChannelRepos()
+}
+
+// GetChannelRepo returns the default repo for a Slack channel, or empty string.
+func (h *Hub) GetChannelRepo(channel string) string {
+	h.channelReposMu.RLock()
+	defer h.channelReposMu.RUnlock()
+	return h.channelRepos[channel]
+}
+
+const channelReposFile = "channel-repos.json"
+
+func (h *Hub) loadChannelRepos() {
+	path := filepath.Join(h.dataDir, channelReposFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("hub: failed to load channel repos: %v", err)
+		}
+		return
+	}
+	var m map[string]string
+	if err := json.Unmarshal(data, &m); err != nil {
+		log.Printf("hub: failed to parse channel repos: %v", err)
+		return
+	}
+	h.channelRepos = m
+	log.Printf("hub: loaded %d channel-repo mappings", len(m))
+}
+
+func (h *Hub) saveChannelRepos() {
+	h.channelReposMu.RLock()
+	data, err := json.Marshal(h.channelRepos)
+	h.channelReposMu.RUnlock()
+	if err != nil {
+		log.Printf("hub: failed to marshal channel repos: %v", err)
+		return
+	}
+	path := filepath.Join(h.dataDir, channelReposFile)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		log.Printf("hub: failed to write channel repos: %v", err)
+		return
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		log.Printf("hub: failed to rename channel repos: %v", err)
 	}
 }
 

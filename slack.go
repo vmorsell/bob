@@ -245,7 +245,8 @@ func handleMention(client *slack.Client, orch *Orchestrator, botUserID string, h
 			messages = []Message{{Role: RoleUser, Content: userText}}
 		}
 
-		result, err = orch.HandleNewRequest(ctx, messages, func(jobID string) {
+		defaultRepo := hub.GetChannelRepo(ev.Channel)
+		result, err = orch.HandleNewRequest(ctx, messages, defaultRepo, func(jobID string) {
 			msg := "Working on a plan..."
 			if bobURL != "" {
 				msg = fmt.Sprintf("Working on a plan... Follow my progress here: <%s/jobs/%s?token=%s>", bobURL, jobID, apiToken)
@@ -378,6 +379,74 @@ func threadToMessages(replies []slack.Message, botUserID string) []Message {
 
 func stripMention(text string) string {
 	return strings.TrimSpace(mentionRe.ReplaceAllString(text, ""))
+}
+
+// NewSlashCommandHandler handles the /bob-repo slash command for setting channel default repos.
+func NewSlashCommandHandler(signingSecret string, hub *Hub) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		body, err := io.ReadAll(io.LimitReader(r.Body, maxSlackBodySize+1))
+		if err != nil {
+			http.Error(w, "failed to read body", http.StatusBadRequest)
+			return
+		}
+		if len(body) > maxSlackBodySize {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+
+		// Verify Slack request signature.
+		sv, err := slack.NewSecretsVerifier(r.Header, signingSecret)
+		if err != nil {
+			http.Error(w, "failed to create verifier", http.StatusUnauthorized)
+			return
+		}
+		if _, err := sv.Write(body); err != nil {
+			http.Error(w, "failed to write body to verifier", http.StatusUnauthorized)
+			return
+		}
+		if err := sv.Ensure(); err != nil {
+			http.Error(w, "invalid signature", http.StatusUnauthorized)
+			return
+		}
+
+		// Re-parse form from the verified body.
+		r.Body = io.NopCloser(strings.NewReader(string(body)))
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "failed to parse form", http.StatusBadRequest)
+			return
+		}
+
+		channelID := r.FormValue("channel_id")
+		text := strings.TrimSpace(r.FormValue("text"))
+
+		var respText string
+		switch {
+		case text == "":
+			repo := hub.GetChannelRepo(channelID)
+			if repo == "" {
+				respText = "No default repo set for this channel."
+			} else {
+				respText = fmt.Sprintf("Default repo for this channel: *%s*", repo)
+			}
+		case text == "clear":
+			hub.ClearChannelRepo(channelID)
+			respText = "Cleared default repo for this channel."
+		default:
+			hub.SetChannelRepo(channelID, text)
+			respText = fmt.Sprintf("Default repo for this channel set to *%s*.", text)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"response_type": "ephemeral",
+			"text":          respText,
+		})
+	})
 }
 
 // NewSlackInteractionHandler handles Slack interactive component callbacks (button clicks).

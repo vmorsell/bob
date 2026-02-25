@@ -55,8 +55,9 @@ func NewOrchestrator(anthropicKey, githubOwner, githubToken, claudeCodeToken str
 }
 
 // HandleNewRequest parses intent from a first mention and starts the planning session.
+// defaultRepo is the channel's configured default repo (may be empty).
 // onJobCreated is called with the job ID right after the job is created, before cloning or planning.
-func (o *Orchestrator) HandleNewRequest(ctx context.Context, messages []Message, onJobCreated func(jobID string)) (OrchestratorResult, error) {
+func (o *Orchestrator) HandleNewRequest(ctx context.Context, messages []Message, defaultRepo string, onJobCreated func(jobID string)) (OrchestratorResult, error) {
 	intent, err := ParseIntent(ctx, o.anthropicKey, messages)
 	if err != nil {
 		return OrchestratorResult{}, fmt.Errorf("parse intent: %w", err)
@@ -66,6 +67,13 @@ func (o *Orchestrator) HandleNewRequest(ctx context.Context, messages []Message,
 	if intent.Question != "" {
 		return OrchestratorResult{Text: intent.Question}, nil
 	}
+
+	// Fall back to channel default repo if intent parsing didn't extract one.
+	if intent.Repo == "" && defaultRepo != "" {
+		intent.Repo = defaultRepo
+		log.Printf("orchestrator: using channel default repo %q", defaultRepo)
+	}
+
 	if intent.Repo == "" || intent.Task == "" {
 		return OrchestratorResult{Text: "I couldn't determine the repository or task from your message. Could you please specify which repository you'd like me to work on and what changes you'd like me to make?"}, nil
 	}
