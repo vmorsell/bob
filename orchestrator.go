@@ -152,11 +152,10 @@ func (o *Orchestrator) HandleNewRequest(ctx context.Context, messages []Message,
 	}
 
 	// Store paths in job state.
-	state, _ := o.hub.GetJobState(jobID)
-	state.mu.Lock()
-	state.RepoDir = repoDir
-	state.BaseDir = baseDir
-	state.mu.Unlock()
+	o.hub.UpdateJobState(jobID, func(s *JobState) {
+		s.RepoDir = repoDir
+		s.BaseDir = baseDir
+	})
 
 	// Run planning session.
 	log.Printf("orchestrator: starting planning session for %s", intent.Repo)
@@ -234,9 +233,7 @@ func (o *Orchestrator) HandleReply(ctx context.Context, jobID, userText string) 
 
 	// Update session ID if it changed.
 	if sr.SessionID != "" {
-		state.mu.Lock()
-		state.SessionID = sr.SessionID
-		state.mu.Unlock()
+		o.hub.UpdateJobState(jobID, func(s *JobState) { s.SessionID = sr.SessionID })
 	}
 
 	return o.processSessionResult(ctx, jobID, sr, repoDir)
@@ -347,13 +344,9 @@ func (o *Orchestrator) HandleApproval(ctx context.Context, jobID string) (Orches
 // processSessionResult inspects a planning session result and returns the appropriate
 // orchestrator result, updating job state as needed.
 func (o *Orchestrator) processSessionResult(ctx context.Context, jobID string, sr *SessionResult, repoDir string) (OrchestratorResult, error) {
-	state, _ := o.hub.GetJobState(jobID)
-
 	// Update session ID.
 	if sr.SessionID != "" {
-		state.mu.Lock()
-		state.SessionID = sr.SessionID
-		state.mu.Unlock()
+		o.hub.UpdateJobState(jobID, func(s *JobState) { s.SessionID = sr.SessionID })
 	}
 
 	if sr.IsError {
@@ -378,10 +371,10 @@ func (o *Orchestrator) processSessionResult(ctx context.Context, jobID string, s
 			planContent = sr.ResultText
 		}
 
-		state.mu.Lock()
-		state.PlanFilePath = sr.PlanFilePath
-		state.PlanContent = planContent
-		state.mu.Unlock()
+		o.hub.UpdateJobState(jobID, func(s *JobState) {
+			s.PlanFilePath = sr.PlanFilePath
+			s.PlanContent = planContent
+		})
 		o.hub.SetPhase(jobID, PhaseAwaitingApproval)
 
 		o.hub.Emit(jobID, EventPlanGenerated, map[string]any{"plan": planContent})
@@ -399,9 +392,7 @@ func (o *Orchestrator) processSessionResult(ctx context.Context, jobID string, s
 
 	// Fallback: no explicit signal — use ResultText as plan.
 	if sr.ResultText != "" {
-		state.mu.Lock()
-		state.PlanContent = sr.ResultText
-		state.mu.Unlock()
+		o.hub.UpdateJobState(jobID, func(s *JobState) { s.PlanContent = sr.ResultText })
 		o.hub.SetPhase(jobID, PhaseAwaitingApproval)
 
 		o.hub.Emit(jobID, EventPlanGenerated, map[string]any{"plan": sr.ResultText})
