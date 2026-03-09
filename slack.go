@@ -208,9 +208,9 @@ func handleMention(client *slack.Client, orch *Orchestrator, botUserID string, h
 				if updateErr != nil {
 					log.Printf("failed to update old plan message: %v", updateErr)
 				}
-				state.mu.Lock()
-				state.PlanMsgTS = "" // prevent post-session double-update
-				state.mu.Unlock()
+				hub.UpdateJobState(activeJobID, func(s *JobState) {
+					s.PlanMsgTS = "" // prevent post-session double-update
+				})
 			}
 		}
 
@@ -301,10 +301,8 @@ func handleMention(client *slack.Client, orch *Orchestrator, botUserID string, h
 		)
 		if postErr != nil {
 			log.Printf("failed to post plan message: %v", postErr)
-		} else if state, ok := hub.GetJobState(result.JobID); ok {
-			state.mu.Lock()
-			state.PlanMsgTS = msgTS
-			state.mu.Unlock()
+		} else {
+			hub.UpdateJobState(result.JobID, func(s *JobState) { s.PlanMsgTS = msgTS })
 		}
 		return
 	}

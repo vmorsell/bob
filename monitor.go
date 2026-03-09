@@ -81,6 +81,21 @@ type JobState struct {
 	BaseDir      string // base clone path (/workspace/<repo>)
 }
 
+// jobStateSnapshot is a JSON-serializable mirror of JobState (no mutex).
+type jobStateSnapshot struct {
+	SessionID    string   `json:"session_id"`
+	Repo         string   `json:"repo"`
+	Task         string   `json:"task"`
+	Phase        JobPhase `json:"phase"`
+	PlanFilePath string   `json:"plan_file_path"`
+	PlanContent  string   `json:"plan_content"`
+	Channel      string   `json:"channel"`
+	ThreadTS     string   `json:"thread_ts"`
+	PlanMsgTS    string   `json:"plan_msg_ts"`
+	RepoDir      string   `json:"repo_dir"`
+	BaseDir      string   `json:"base_dir"`
+}
+
 // Hub manages SSE clients, persists events to JSONL files, and fans out events.
 type Hub struct {
 	mu            sync.RWMutex
@@ -116,6 +131,8 @@ func NewHub(dataDir string) *Hub {
 		channelRepos:  make(map[string]string),
 	}
 	h.loadChannelRepos()
+	h.loadJobStates()   // must run before loadThreadJobs
+	h.loadThreadJobs()  // filters against loaded job states
 	go h.run()
 	return h
 }
@@ -156,8 +173,9 @@ func (h *Hub) RegisterThreadJob(channel, threadTS, jobID string) {
 		return
 	}
 	h.threadMu.Lock()
-	defer h.threadMu.Unlock()
 	h.threadJobs[channel+":"+threadTS] = jobID
+	h.threadMu.Unlock()
+	h.saveThreadJobs()
 }
 
 // UnregisterThreadJob removes the thread→job mapping when a job closes.
@@ -166,8 +184,9 @@ func (h *Hub) UnregisterThreadJob(channel, threadTS string) {
 		return
 	}
 	h.threadMu.Lock()
-	defer h.threadMu.Unlock()
 	delete(h.threadJobs, channel+":"+threadTS)
+	h.threadMu.Unlock()
+	h.saveThreadJobs()
 }
 
 // LockThread acquires a per-thread mutex, serializing handleMention calls for the same thread.
@@ -191,6 +210,7 @@ func (h *Hub) SetJobState(jobID string, state *JobState) {
 		return
 	}
 	h.jobStates.Store(jobID, state)
+	h.saveJobStates()
 }
 
 // GetJobState returns the state for a job.
@@ -205,6 +225,21 @@ func (h *Hub) GetJobState(jobID string) (*JobState, bool) {
 	return v.(*JobState), true
 }
 
+// UpdateJobState locks state, calls fn, unlocks, then persists.
+func (h *Hub) UpdateJobState(jobID string, fn func(*JobState)) {
+	if h == nil {
+		return
+	}
+	state, ok := h.GetJobState(jobID)
+	if !ok {
+		return
+	}
+	state.mu.Lock()
+	fn(state)
+	state.mu.Unlock()
+	h.saveJobStates()
+}
+
 // SetPhase updates a job's phase and emits a phase_changed event.
 func (h *Hub) SetPhase(jobID string, phase JobPhase) {
 	if h == nil {
@@ -215,9 +250,10 @@ func (h *Hub) SetPhase(jobID string, phase JobPhase) {
 		return
 	}
 	state.mu.Lock()
-	defer state.mu.Unlock()
 	state.Phase = phase
+	state.mu.Unlock() // explicit, not defer
 	h.Emit(jobID, EventPhaseChanged, map[string]any{"phase": string(phase)})
+	h.saveJobStates()
 }
 
 // TryStartImplementation atomically transitions a job from awaiting_approval to implementing.
@@ -231,13 +267,15 @@ func (h *Hub) TryStartImplementation(jobID string) bool {
 		return false
 	}
 	state.mu.Lock()
-	defer state.mu.Unlock()
 	// Only allow transition from awaiting_approval.
 	if state.Phase != PhaseAwaitingApproval {
+		state.mu.Unlock()
 		return false
 	}
 	state.Phase = PhaseImplementing
+	state.mu.Unlock() // explicit, not defer
 	h.Emit(jobID, EventPhaseChanged, map[string]any{"phase": string(PhaseImplementing)})
+	h.saveJobStates()
 	return true
 }
 
@@ -251,10 +289,13 @@ func (h *Hub) ClearImplementation(jobID string) {
 		return
 	}
 	state.mu.Lock()
-	defer state.mu.Unlock()
 	if state.Phase == PhaseImplementing {
 		state.Phase = PhaseAwaitingApproval
+		state.mu.Unlock() // explicit, not defer
 		h.Emit(jobID, EventPhaseChanged, map[string]any{"phase": string(PhaseAwaitingApproval)})
+		h.saveJobStates()
+	} else {
+		state.mu.Unlock()
 	}
 }
 
@@ -318,6 +359,138 @@ func (h *Hub) saveChannelRepos() {
 	if err := os.Rename(tmp, path); err != nil {
 		log.Printf("hub: failed to rename channel repos: %v", err)
 	}
+}
+
+const jobStatesFile = "job-states.json"
+const threadJobsFile = "thread-jobs.json"
+
+func (h *Hub) saveJobStates() {
+	snapshots := make(map[string]jobStateSnapshot)
+	h.jobStates.Range(func(k, v any) bool {
+		jobID := k.(string)
+		state := v.(*JobState)
+		state.mu.Lock()
+		if state.Phase == PhaseDone {
+			state.mu.Unlock()
+			return true
+		}
+		snapshots[jobID] = jobStateSnapshot{
+			SessionID:    state.SessionID,
+			Repo:         state.Repo,
+			Task:         state.Task,
+			Phase:        state.Phase,
+			PlanFilePath: state.PlanFilePath,
+			PlanContent:  state.PlanContent,
+			Channel:      state.Channel,
+			ThreadTS:     state.ThreadTS,
+			PlanMsgTS:    state.PlanMsgTS,
+			RepoDir:      state.RepoDir,
+			BaseDir:      state.BaseDir,
+		}
+		state.mu.Unlock()
+		return true
+	})
+	data, err := json.Marshal(snapshots)
+	if err != nil {
+		log.Printf("hub: failed to marshal job states: %v", err)
+		return
+	}
+	path := filepath.Join(h.dataDir, jobStatesFile)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		log.Printf("hub: failed to write job states: %v", err)
+		return
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		log.Printf("hub: failed to rename job states: %v", err)
+	}
+}
+
+func (h *Hub) loadJobStates() {
+	path := filepath.Join(h.dataDir, jobStatesFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("hub: failed to load job states: %v", err)
+		}
+		return
+	}
+	var snapshots map[string]jobStateSnapshot
+	if err := json.Unmarshal(data, &snapshots); err != nil {
+		log.Printf("hub: failed to parse job states: %v", err)
+		return
+	}
+	count := 0
+	for jobID, snap := range snapshots {
+		phase := snap.Phase
+		// An in-progress implementation died with the restart; let user re-approve.
+		if phase == PhaseImplementing {
+			phase = PhaseAwaitingApproval
+			log.Printf("hub: job %s was implementing at restart, restoring to awaiting_approval", jobID)
+		}
+		h.jobStates.Store(jobID, &JobState{
+			SessionID:    snap.SessionID,
+			Repo:         snap.Repo,
+			Task:         snap.Task,
+			Phase:        phase,
+			PlanFilePath: snap.PlanFilePath,
+			PlanContent:  snap.PlanContent,
+			Channel:      snap.Channel,
+			ThreadTS:     snap.ThreadTS,
+			PlanMsgTS:    snap.PlanMsgTS,
+			RepoDir:      snap.RepoDir,
+			BaseDir:      snap.BaseDir,
+		})
+		count++
+	}
+	log.Printf("hub: loaded %d job states", count)
+}
+
+func (h *Hub) saveThreadJobs() {
+	h.threadMu.Lock()
+	data, err := json.Marshal(h.threadJobs)
+	h.threadMu.Unlock()
+	if err != nil {
+		log.Printf("hub: failed to marshal thread jobs: %v", err)
+		return
+	}
+	path := filepath.Join(h.dataDir, threadJobsFile)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		log.Printf("hub: failed to write thread jobs: %v", err)
+		return
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		log.Printf("hub: failed to rename thread jobs: %v", err)
+	}
+}
+
+// loadThreadJobs must be called AFTER loadJobStates.
+// Filters stale thread→job mappings whose job state wasn't loaded.
+func (h *Hub) loadThreadJobs() {
+	path := filepath.Join(h.dataDir, threadJobsFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("hub: failed to load thread jobs: %v", err)
+		}
+		return
+	}
+	var m map[string]string
+	if err := json.Unmarshal(data, &m); err != nil {
+		log.Printf("hub: failed to parse thread jobs: %v", err)
+		return
+	}
+	count := 0
+	for key, jobID := range m {
+		if _, ok := h.jobStates.Load(jobID); !ok {
+			log.Printf("hub: dropping stale thread mapping %s → %s (no job state)", key, jobID)
+			continue
+		}
+		h.threadJobs[key] = jobID
+		count++
+	}
+	log.Printf("hub: loaded %d thread→job mappings", count)
 }
 
 // run processes the broadcast channel — single goroutine owns jobFiles.
